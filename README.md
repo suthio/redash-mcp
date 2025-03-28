@@ -2,6 +2,10 @@
 
 Model Context Protocol (MCP) server for integrating Redash with AI assistants like Claude.
 
+<a href="https://glama.ai/mcp/servers/j9bl90s3tw">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/j9bl90s3tw/badge" alt="Redash Server MCP server" />
+</a>
+
 ## Features
 
 - Connect to Redash instances via the Redash API
