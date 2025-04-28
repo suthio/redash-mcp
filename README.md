@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/mseep-audited.png)](https://mseep.ai/app/suthio-redash-mcp)
+
 # Redash MCP Server
 
 Model Context Protocol (MCP) server for integrating Redash with AI assistants like Claude.
