@@ -10,7 +10,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import * as dotenv from 'dotenv';
-import { redashClient, CreateQueryRequest, UpdateQueryRequest } from "./redashClient.js";
+import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest } from "./redashClient.js";
 import { logger, LogLevel } from "./logger.js";
 
 // Load environment variables
@@ -436,6 +436,117 @@ async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>
   }
 }
 
+// Tool: create_visualization
+const createVisualizationSchema = z.object({
+  query_id: z.number(),
+  type: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  options: z.any()
+});
+
+async function createVisualization(params: z.infer<typeof createVisualizationSchema>) {
+  try {
+    const visualizationData: CreateVisualizationRequest = {
+      query_id: params.query_id,
+      type: params.type,
+      name: params.name,
+      description: params.description,
+      options: params.options
+    };
+
+    const result = await redashClient.createVisualization(visualizationData);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    console.error('Error creating visualization:', error);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error creating visualization: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: update_visualization
+const updateVisualizationSchema = z.object({
+  visualizationId: z.number(),
+  type: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  options: z.any().optional()
+});
+
+async function updateVisualization(params: z.infer<typeof updateVisualizationSchema>) {
+  try {
+    const { visualizationId, ...updateData } = params;
+    const result = await redashClient.updateVisualization(visualizationId, updateData);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    console.error(`Error updating visualization ${params.visualizationId}:`, error);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error updating visualization ${params.visualizationId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: delete_visualization
+const deleteVisualizationSchema = z.object({
+  visualizationId: z.number()
+});
+
+async function deleteVisualization(params: z.infer<typeof deleteVisualizationSchema>) {
+  try {
+    const { visualizationId } = params;
+    await redashClient.deleteVisualization(visualizationId);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Visualization ${visualizationId} deleted successfully`
+        }
+      ]
+    };
+  } catch (error) {
+    console.error(`Error deleting visualization ${params.visualizationId}:`, error);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error deleting visualization ${params.visualizationId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
 // ----- Resources Implementation -----
 
 // List available resources
@@ -662,6 +773,47 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["query", "dataSourceId"]
         }
+      },
+      {
+        name: "create_visualization",
+        description: "Create a new visualization for a query",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query_id: { type: "number", description: "ID of the query to create visualization for" },
+            type: { type: "string", description: "Type of visualization. Available types depend on your Redash instance. Use get_query to see existing visualization types in use." },
+            name: { type: "string", description: "Name of the visualization" },
+            description: { type: "string", description: "Description of the visualization" },
+            options: { type: "object", description: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to examine existing visualizations of the same type as a reference." }
+          },
+          required: ["query_id", "type", "name", "options"]
+        }
+      },
+      {
+        name: "update_visualization",
+        description: "Update an existing visualization",
+        inputSchema: {
+          type: "object",
+          properties: {
+            visualizationId: { type: "number", description: "ID of the visualization to update" },
+            type: { type: "string", description: "Type of visualization. Available types depend on your Redash instance." },
+            name: { type: "string", description: "Name of the visualization" },
+            description: { type: "string", description: "Description of the visualization" },
+            options: { type: "object", description: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to see the current configuration before updating." }
+          },
+          required: ["visualizationId"]
+        }
+      },
+      {
+        name: "delete_visualization",
+        description: "Delete a visualization",
+        inputSchema: {
+          type: "object",
+          properties: {
+            visualizationId: { type: "number", description: "ID of the visualization to delete" }
+          },
+          required: ["visualizationId"]
+        }
       }
     ]
   };
@@ -749,6 +901,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "execute_adhoc_query":
         logger.debug(`Handling execute_adhoc_query`);
         return await executeAdhocQuery(executeAdhocQuerySchema.parse(args));
+
+      case "create_visualization":
+        return await createVisualization(createVisualizationSchema.parse(args));
+
+      case "update_visualization":
+        return await updateVisualization(updateVisualizationSchema.parse(args));
+
+      case "delete_visualization":
+        return await deleteVisualization(deleteVisualizationSchema.parse(args));
 
       default:
         logger.error(`Unknown tool requested: ${name}`);

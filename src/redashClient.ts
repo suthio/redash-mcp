@@ -52,6 +52,22 @@ export interface RedashVisualization {
   query_id: number;
 }
 
+// New interfaces for visualization creation and update
+export interface CreateVisualizationRequest {
+  query_id: number;
+  type: string;
+  name: string;
+  description?: string;
+  options: any;
+}
+
+export interface UpdateVisualizationRequest {
+  type?: string;
+  name?: string;
+  description?: string;
+  options?: any;
+}
+
 export interface RedashQueryResult {
   id: number;
   query_id: number;
@@ -433,6 +449,38 @@ export class RedashClient {
     } catch (error) {
       logger.error(`Error executing adhoc query: ${error}`);
       throw new Error(`Failed to execute adhoc query: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Create a new visualization
+  async createVisualization(data: CreateVisualizationRequest): Promise<RedashVisualization> {
+    try {
+      const response = await this.client.post('/api/visualizations', data);
+      return response.data;
+    } catch (error) {
+      console.error('Error creating visualization:', error);
+      throw new Error('Failed to create visualization');
+    }
+  }
+
+  // Update an existing visualization
+  async updateVisualization(visualizationId: number, data: UpdateVisualizationRequest): Promise<RedashVisualization> {
+    try {
+      const response = await this.client.post(`/api/visualizations/${visualizationId}`, data);
+      return response.data;
+    } catch (error) {
+      console.error(`Error updating visualization ${visualizationId}:`, error);
+      throw new Error(`Failed to update visualization ${visualizationId}`);
+    }
+  }
+
+  // Delete a visualization
+  async deleteVisualization(visualizationId: number): Promise<void> {
+    try {
+      await this.client.delete(`/api/visualizations/${visualizationId}`);
+    } catch (error) {
+      console.error(`Error deleting visualization ${visualizationId}:`, error);
+      throw new Error(`Failed to delete visualization ${visualizationId}`);
     }
   }
 }

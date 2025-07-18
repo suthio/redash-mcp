@@ -108,6 +108,11 @@ Add the following configuration (edit paths as needed):
 - `get-dashboard`: Get dashboard details and visualizations 
 - `get-visualization`: Get details of a specific visualization
 
+### Visualization Management
+- `create-visualization`: Create a new visualization for a query
+- `update-visualization`: Update an existing visualization
+- `delete-visualization`: Delete a visualization
+
 ## Development
 
 Run in development mode:
