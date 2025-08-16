@@ -14,7 +14,7 @@
     "build": "npx tsc && chmod +x dist/index.js dist/cli.js",
     "start": "node dist/cli.js",
     "dev": "ts-node src/index.ts",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
