@@ -110,6 +110,16 @@ export interface RedashDashboard {
   }>;
 }
 
+export interface RedashSchema {
+  schema: Array<{
+    name: string;
+    columns: Array<{
+      name: string;
+      type: string;
+    }>;
+  }>;
+}
+
 // RedashClient class for API communication
 export class RedashClient {
   private client: AxiosInstance;
@@ -300,7 +310,7 @@ export class RedashClient {
       if (axios.isAxiosError(error)) {
         const axiosError = error as AxiosError;
         logger.error(`Error executing query ${queryId}: ${axiosError.message}`);
-        
+
         // Extract detailed error information
         if (axiosError.response) {
           const statusCode = axiosError.response.status;
@@ -350,11 +360,11 @@ export class RedashClient {
         if (error instanceof Error && error.message.startsWith('Query execution failed:')) {
           throw error;
         }
-        
+
         if (axios.isAxiosError(error)) {
           const axiosError = error as AxiosError;
           logger.error(`Error polling for query results (job ${jobId}): ${axiosError.message}`);
-          
+
           // Extract detailed error information
           if (axiosError.response) {
             const statusCode = axiosError.response.status;
@@ -481,6 +491,24 @@ export class RedashClient {
     } catch (error) {
       console.error(`Error deleting visualization ${visualizationId}:`, error);
       throw new Error(`Failed to delete visualization ${visualizationId}`);
+    }
+  }
+
+  // Get a specific data source schema by data source ID
+  async getSchema(dataSourceId: number): Promise<RedashSchema> {
+    try {
+      const response = await this.client.get(
+        `/api/data_sources/${dataSourceId}/schema`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error fetching data source ${dataSourceId} schema:`,
+        error
+      );
+      throw new Error(
+        `Failed to fetch data source ${dataSourceId} schema from Redash`
+      );
     }
   }
 }
