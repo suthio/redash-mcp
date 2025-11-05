@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.5](https://github.com/suthio/redash-mcp/compare/v0.0.4...v0.0.5) - 2025-11-05
+- Add get_schema tool by @winebarrel in https://github.com/suthio/redash-mcp/pull/19
+
 ## [v0.0.4](https://github.com/suthio/redash-mcp/commits/v0.0.4) - 2025-08-16
 - add MCP server badge by @punkpeye in https://github.com/suthio/redash-mcp/pull/1
 - Update naming convention from kebab-case to snake_case by @suthio in https://github.com/suthio/redash-mcp/pull/3
