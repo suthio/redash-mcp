@@ -306,6 +306,39 @@ async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
   }
 }
 
+// Tool: get_query_results_csv
+const getQueryResultsCsvSchema = z.object({
+  queryId: z.number(),
+  refresh: z.boolean().optional().default(false)
+});
+
+async function getQueryResultsCsv(params: z.infer<typeof getQueryResultsCsvSchema>) {
+  try {
+    const { queryId, refresh } = params;
+    const csv = await redashClient.getQueryResultsAsCsv(queryId, refresh);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: csv
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error getting CSV results for query ${params.queryId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error getting CSV results for query ${params.queryId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
 // Tool: list_dashboards
 const listDashboardsSchema = z.object({
   page: z.number().optional().default(1),
@@ -730,6 +763,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_query_results_csv",
+        description: "Get query results in CSV format. Returns the last cached results, or optionally refreshes the query first to get the latest data. Note: Does not support parameterized queries.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queryId: { type: "number", description: "ID of the query to get results from" },
+            refresh: { type: "boolean", description: "Whether to refresh the query before fetching results to ensure latest data (default: false)" }
+          },
+          required: ["queryId"]
+        }
+      },
+      {
         name: "list_dashboards",
         description: "List all available dashboards in Redash",
         inputSchema: {
@@ -885,6 +930,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "execute_query":
         logger.debug(`Handling execute_query`);
         return await executeQuery(executeQuerySchema.parse(args));
+
+      case "get_query_results_csv":
+        logger.debug(`Handling get_query_results_csv`);
+        return await getQueryResultsCsv(getQueryResultsCsvSchema.parse(args));
 
       case "list_dashboards":
         logger.debug(`Handling list_dashboards`);

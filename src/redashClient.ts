@@ -483,6 +483,43 @@ export class RedashClient {
       throw new Error(`Failed to delete visualization ${visualizationId}`);
     }
   }
+
+  // Get query results as CSV
+  async getQueryResultsAsCsv(queryId: number, refresh = false): Promise<string> {
+    try {
+      // Optionally refresh the query before fetching results
+      if (refresh) {
+        logger.debug(`Refreshing query ${queryId} before fetching CSV results`);
+        await this.executeQuery(queryId);
+      }
+
+      logger.debug(`Fetching CSV results for query ${queryId}`);
+      const response = await this.client.get(`/api/queries/${queryId}/results.csv`, {
+        responseType: 'text'
+      });
+
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError;
+        logger.error(`Error fetching CSV results for query ${queryId}: ${axiosError.message}`);
+
+        if (axiosError.response) {
+          const statusCode = axiosError.response.status;
+          const errorData = axiosError.response.data;
+          throw new Error(`Failed to fetch CSV results for query ${queryId}: Redash API error (${statusCode}): ${errorData}`);
+        } else if (axiosError.request) {
+          throw new Error(`Failed to fetch CSV results for query ${queryId}: No response received from Redash API: ${axiosError.message}`);
+        } else {
+          throw new Error(`Failed to fetch CSV results for query ${queryId}: ${axiosError.message}`);
+        }
+      } else {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`Error fetching CSV results for query ${queryId}: ${errorMessage}`);
+        throw new Error(`Failed to fetch CSV results for query ${queryId}: ${errorMessage}`);
+      }
+    }
+  }
 }
 
 // Export a singleton instance

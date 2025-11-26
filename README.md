@@ -102,6 +102,7 @@ Add the following configuration (edit paths as needed):
 ### Query Execution
 - `execute-query`: Execute a query and return results
 - `execute-adhoc-query`: Execute an ad-hoc query without saving it to Redash
+- `get-query-results-csv`: Get query results in CSV format (supports optional refresh for latest data)
 
 ### Dashboard Management
 - `list-dashboards`: List all available dashboards
