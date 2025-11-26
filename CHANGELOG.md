@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.6](https://github.com/suthio/redash-mcp/compare/v0.0.5...v0.0.6) - 2025-11-26
+- feat: Add CSV export support for query results by @suthio in https://github.com/suthio/redash-mcp/pull/20
+
 ## [v0.0.5](https://github.com/suthio/redash-mcp/compare/v0.0.4...v0.0.5) - 2025-11-05
 - Add get_schema tool by @winebarrel in https://github.com/suthio/redash-mcp/pull/19
 
