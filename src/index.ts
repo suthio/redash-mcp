@@ -580,6 +580,42 @@ async function deleteVisualization(params: z.infer<typeof deleteVisualizationSch
   }
 }
 
+// Tool: get_schema
+const getSchemaSchema = z.object({
+  dataSourceId: z.number(),
+});
+
+async function getSchema(params: z.infer<typeof getSchemaSchema>) {
+  try {
+    const { dataSourceId } = params;
+    const query = await redashClient.getSchema(dataSourceId);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(query, null, 2),
+        },
+      ],
+    };
+  } catch (error) {
+    logger.error(
+      `Error getting data source ${params.dataSourceId} schema: ${error}`
+    );
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error getting data source ${params.dataSourceId} schema: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        },
+      ],
+    };
+  }
+}
+
 // ----- Resources Implementation -----
 
 // List available resources
@@ -859,6 +895,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["visualizationId"]
         }
+      },
+      {
+        name: "get_schema",
+        description: "Get schema of a specific data source",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dataSourceId: {
+              type: "number",
+              description: "ID of the data source to get schema",
+            },
+          },
+          required: ["dataSourceId"],
+        },
       }
     ]
   };
@@ -959,6 +1009,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "delete_visualization":
         return await deleteVisualization(deleteVisualizationSchema.parse(args));
+
+      case "get_schema":
+        logger.debug(`Handling get_schema`);
+        return await getSchema(getSchemaSchema.parse(args));
 
       default:
         logger.error(`Unknown tool requested: ${name}`);
