@@ -134,14 +134,58 @@ export class RedashClient {
       throw new Error('REDASH_URL and REDASH_API_KEY must be provided in .env file');
     }
 
+    const defaultHeaders: Record<string, string> = {
+      'Authorization': `Key ${this.apiKey}`,
+      'Content-Type': 'application/json'
+    };
+
+    const extraHeaders = this.parseExtraHeaders();
+
+    // Prevent accidental override of Authorization header
+    if (extraHeaders['Authorization'] || extraHeaders['authorization']) {
+      delete extraHeaders['Authorization'];
+      delete extraHeaders['authorization'];
+    }
+
     this.client = axios.create({
       baseURL: this.baseUrl,
       headers: {
-        'Authorization': `Key ${this.apiKey}`,
-        'Content-Type': 'application/json'
+        ...defaultHeaders,
+        ...extraHeaders,
       },
       timeout: parseInt(process.env.REDASH_TIMEOUT || '30000')
     });
+  }
+
+  // Parse extra headers from env var `REDASH_EXTRA_HEADERS`.
+  // Supports JSON object or `key=value;key2=value2` format.
+  private parseExtraHeaders(): Record<string, string> {
+    const raw = process.env.REDASH_EXTRA_HEADERS;
+    if (!raw) return {};
+
+    // Try JSON first
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        return Object.fromEntries(
+          Object.entries(obj as Record<string, unknown>)
+            .filter(([k, v]) => typeof k === 'string' && v !== undefined && v !== null)
+            .map(([k, v]) => [k, String(v)])
+        );
+      }
+    } catch { /* fall through to key=value parser */ }
+
+    // Fallback: parse `key=value; key2=value2` or comma-separated
+    const headers: Record<string, string> = {};
+    const parts = raw.split(/[;,]/);
+    for (const part of parts) {
+      const idx = part.indexOf('=');
+      if (idx === -1) continue;
+      const key = part.slice(0, idx).trim();
+      const value = part.slice(idx + 1).trim();
+      if (key) headers[key] = value;
+    }
+    return headers;
   }
 
   // Get all queries (with pagination)
@@ -193,7 +237,9 @@ export class RedashClient {
         };
 
         logger.info(`Request data: ${JSON.stringify(requestData)}`);
-        logger.info(`Request headers: ${JSON.stringify(this.client.defaults.headers)}`);
+        // Avoid logging sensitive header values; log only header names
+        const headerNames = Object.keys((this.client.defaults as any).headers || {});
+        logger.info(`Request header names: ${JSON.stringify(headerNames)}`);
         const response = await this.client.post('/api/queries', requestData);
         logger.info(`Created query with ID: ${response.data.id}`);
         return response.data;

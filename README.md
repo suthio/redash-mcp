@@ -32,6 +32,23 @@ The server requires the following environment variables:
 Optional variables:
 - `REDASH_TIMEOUT`: Timeout for API requests in milliseconds (default: 30000)
 - `REDASH_MAX_RESULTS`: Maximum number of results to return (default: 1000)
+- `REDASH_EXTRA_HEADERS`: Extra HTTP headers to include with every Redash request. Accepts either a JSON object string or a semicolon/comma-separated list of `key=value` pairs.
+
+Examples:
+
+JSON (recommended):
+```
+REDASH_EXTRA_HEADERS='{"CF-Access-Client-Id":"<client_id>","CF-Access-Client-Secret":"<client_secret>"}'
+```
+
+Key/value list:
+```
+REDASH_EXTRA_HEADERS=CF-Access-Client-Id=<client_id>;CF-Access-Client-Secret=<client_secret>
+```
+
+Notes:
+- The `Authorization` header is managed by the server (`Key <REDASH_API_KEY>`) and cannot be overridden.
+- All extra headers are added to every request made to Redash.
 
 ## Installation
 
@@ -50,6 +67,8 @@ Optional variables:
    ```
    REDASH_URL=https://your-redash-instance.com
    REDASH_API_KEY=your_api_key
+   # Optional: Cloudflare Access (or other gateway) headers
+   # REDASH_EXTRA_HEADERS='{"CF-Access-Client-Id":"<client_id>","CF-Access-Client-Secret":"<client_secret>"}'
    ```
 
 4. Build the project:
