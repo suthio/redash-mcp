@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.7](https://github.com/suthio/redash-mcp/compare/v0.0.6...v0.0.7) - 2026-01-07
+- Support custom HTTP headers via REDASH_EXTRA_HEADERS by @suthio in https://github.com/suthio/redash-mcp/pull/23
+
 ## [v0.0.6](https://github.com/suthio/redash-mcp/compare/v0.0.5...v0.0.6) - 2025-11-26
 - feat: Add CSV export support for query results by @suthio in https://github.com/suthio/redash-mcp/pull/20
 
