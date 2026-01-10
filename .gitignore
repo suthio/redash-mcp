@@ -27,3 +27,10 @@ logs/
 
 # Testing
 coverage/
+test-results/
+playwright-report/
+e2e/screenshots/
+
+# LLM
+.gemini/
+.claude/

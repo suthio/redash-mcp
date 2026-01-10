@@ -140,6 +140,35 @@ Run in development mode:
 npm run dev
 ```
 
+## Testing
+
+### Unit Tests
+
+```bash
+npm test
+```
+
+### E2E Tests
+
+```bash
+npm run e2e:test
+```
+
+E2E tests use these default values (can be overridden with environment variables):
+- `REDASH_URL`: https://demo.redash.io
+- `REDASH_API_KEY`: test_api_key
+
+Override example:
+```bash
+REDASH_URL=https://your-instance.com REDASH_API_KEY=your_key npm run e2e:test
+```
+
+### Manual Testing
+
+```bash
+npm run inspector
+```
+
 ## Version History
 
 - v1.1.0: Added query management functionality (create, update, archive)
