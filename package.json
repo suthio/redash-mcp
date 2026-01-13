@@ -1,6 +1,6 @@
 {
   "name": "@suthio/redash-mcp",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "MCP server for Redash integration",
   "type": "module",
   "bin": {
