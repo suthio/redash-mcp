@@ -589,4 +589,474 @@ describe('RedashClient', () => {
       expect(result).toEqual(mockSchema);
     });
   });
+
+  // Dashboard API Tests
+  describe('createDashboard', () => {
+    it('should create a new dashboard', async () => {
+      const dashboardData = { name: 'New Dashboard', tags: ['test'] };
+      const mockResponse = { data: { id: 1, ...dashboardData } };
+
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.createDashboard(dashboardData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/dashboards', dashboardData);
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('updateDashboard', () => {
+    it('should update a dashboard', async () => {
+      const updateData = { name: 'Updated Dashboard' };
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1, ...updateData } });
+
+      const result = await client.updateDashboard(1, updateData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/dashboards/1', updateData);
+      expect(result.name).toBe('Updated Dashboard');
+    });
+  });
+
+  describe('archiveDashboard', () => {
+    it('should archive a dashboard', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.archiveDashboard(1);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/dashboards/1');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('forkDashboard', () => {
+    it('should fork a dashboard', async () => {
+      const mockResponse = { data: { id: 2, name: 'Forked Dashboard' } };
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.forkDashboard(1);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/dashboards/1/fork');
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('shareDashboard', () => {
+    it('should share a dashboard', async () => {
+      const mockResponse = { data: { public_url: 'http://example.com/public/abc', api_key: 'key123' } };
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.shareDashboard(1);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/dashboards/1/share');
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('unshareDashboard', () => {
+    it('should unshare a dashboard', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.unshareDashboard(1);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/dashboards/1/share');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('getMyDashboards', () => {
+    it('should fetch my dashboards', async () => {
+      const mockResponse = {
+        data: { count: 5, page: 1, page_size: 25, results: [{ id: 1, name: 'My Dashboard' }] }
+      };
+      mockAxiosInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await client.getMyDashboards(1, 25);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/my', { params: { page: 1, page_size: 25 } });
+      expect(result.results).toHaveLength(1);
+    });
+  });
+
+  describe('getFavoriteDashboards', () => {
+    it('should fetch favorite dashboards', async () => {
+      const mockResponse = {
+        data: { count: 3, page: 1, page_size: 25, results: [{ id: 1, name: 'Favorite Dashboard' }] }
+      };
+      mockAxiosInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await client.getFavoriteDashboards(1, 25);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/favorites', { params: { page: 1, page_size: 25 } });
+      expect(result.results).toHaveLength(1);
+    });
+  });
+
+  describe('addDashboardFavorite', () => {
+    it('should add dashboard to favorites', async () => {
+      mockAxiosInstance.post.mockResolvedValue({});
+
+      const result = await client.addDashboardFavorite(1);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/dashboards/1/favorite');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('removeDashboardFavorite', () => {
+    it('should remove dashboard from favorites', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.removeDashboardFavorite(1);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/dashboards/1/favorite');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('getDashboardTags', () => {
+    it('should fetch dashboard tags', async () => {
+      const mockResponse = { data: { tags: [{ name: 'sales', count: 5 }] } };
+      mockAxiosInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await client.getDashboardTags();
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/tags');
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  // Alert API Tests
+  describe('getAlerts', () => {
+    it('should fetch all alerts', async () => {
+      const mockAlerts = [{ id: 1, name: 'Alert 1' }, { id: 2, name: 'Alert 2' }];
+      mockAxiosInstance.get.mockResolvedValue({ data: mockAlerts });
+
+      const result = await client.getAlerts();
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/alerts');
+      expect(result).toEqual(mockAlerts);
+    });
+  });
+
+  describe('getAlert', () => {
+    it('should fetch a specific alert', async () => {
+      const mockAlert = { id: 1, name: 'Test Alert', query_id: 123 };
+      mockAxiosInstance.get.mockResolvedValue({ data: mockAlert });
+
+      const result = await client.getAlert(1);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/alerts/1');
+      expect(result).toEqual(mockAlert);
+    });
+  });
+
+  describe('createAlert', () => {
+    it('should create a new alert', async () => {
+      const alertData = {
+        name: 'New Alert',
+        query_id: 123,
+        options: { column: 'count', op: 'greater than', value: 100 }
+      };
+      const mockResponse = { data: { id: 1, ...alertData } };
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.createAlert(alertData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts', alertData);
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('updateAlert', () => {
+    it('should update an alert', async () => {
+      const updateData = { name: 'Updated Alert' };
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1, ...updateData } });
+
+      const result = await client.updateAlert(1, updateData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1', updateData);
+      expect(result.name).toBe('Updated Alert');
+    });
+  });
+
+  describe('deleteAlert', () => {
+    it('should delete an alert', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.deleteAlert(1);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/alerts/1');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('muteAlert', () => {
+    it('should mute an alert', async () => {
+      mockAxiosInstance.post.mockResolvedValue({});
+
+      const result = await client.muteAlert(1);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1/mute');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('getAlertSubscriptions', () => {
+    it('should fetch alert subscriptions', async () => {
+      const mockSubscriptions = [{ id: 1, alert_id: 1, user: { id: 1, name: 'User' } }];
+      mockAxiosInstance.get.mockResolvedValue({ data: mockSubscriptions });
+
+      const result = await client.getAlertSubscriptions(1);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/alerts/1/subscriptions');
+      expect(result).toEqual(mockSubscriptions);
+    });
+  });
+
+  describe('addAlertSubscription', () => {
+    it('should add an alert subscription', async () => {
+      const mockSubscription = { id: 1, alert_id: 1 };
+      mockAxiosInstance.post.mockResolvedValue({ data: mockSubscription });
+
+      const result = await client.addAlertSubscription(1, { destination_id: 2 });
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1/subscriptions', { destination_id: 2 });
+      expect(result).toEqual(mockSubscription);
+    });
+  });
+
+  describe('removeAlertSubscription', () => {
+    it('should remove an alert subscription', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.removeAlertSubscription(1, 2);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/alerts/1/subscriptions/2');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  // Query additional API Tests
+  describe('forkQuery', () => {
+    it('should fork a query', async () => {
+      const mockResponse = { data: { id: 2, name: 'Forked Query' } };
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.forkQuery(1);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/queries/1/fork');
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('getMyQueries', () => {
+    it('should fetch my queries', async () => {
+      const mockResponse = {
+        data: { count: 10, page: 1, page_size: 25, results: [{ id: 1, name: 'My Query' }] }
+      };
+      mockAxiosInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await client.getMyQueries(1, 25);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/queries/my', { params: { page: 1, page_size: 25 } });
+      expect(result.results).toHaveLength(1);
+    });
+  });
+
+  describe('getRecentQueries', () => {
+    it('should fetch recent queries', async () => {
+      const mockResponse = {
+        data: { count: 5, page: 1, page_size: 25, results: [{ id: 1, name: 'Recent Query' }] }
+      };
+      mockAxiosInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await client.getRecentQueries(1, 25);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/queries/recent', { params: { page: 1, page_size: 25 } });
+      expect(result.results).toHaveLength(1);
+    });
+  });
+
+  describe('getQueryTags', () => {
+    it('should fetch query tags', async () => {
+      const mockResponse = { data: { tags: [{ name: 'analytics', count: 10 }] } };
+      mockAxiosInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await client.getQueryTags();
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/queries/tags');
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('getFavoriteQueries', () => {
+    it('should fetch favorite queries', async () => {
+      const mockResponse = {
+        data: { count: 3, page: 1, page_size: 25, results: [{ id: 1, name: 'Favorite Query' }] }
+      };
+      mockAxiosInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await client.getFavoriteQueries(1, 25);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/queries/favorites', { params: { page: 1, page_size: 25 } });
+      expect(result.results).toHaveLength(1);
+    });
+  });
+
+  describe('addQueryFavorite', () => {
+    it('should add query to favorites', async () => {
+      mockAxiosInstance.post.mockResolvedValue({});
+
+      const result = await client.addQueryFavorite(1);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/queries/1/favorite');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  describe('removeQueryFavorite', () => {
+    it('should remove query from favorites', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.removeQueryFavorite(1);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/queries/1/favorite');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  // Widget API Tests
+  describe('getWidgets', () => {
+    it('should fetch all widgets', async () => {
+      const mockWidgets = [{ id: 1, dashboard_id: 1, width: 3 }];
+      mockAxiosInstance.get.mockResolvedValue({ data: mockWidgets });
+
+      const result = await client.getWidgets();
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/widgets');
+      expect(result).toEqual(mockWidgets);
+    });
+  });
+
+  describe('getWidget', () => {
+    it('should fetch a specific widget', async () => {
+      const mockWidget = { id: 1, dashboard_id: 1, width: 3 };
+      mockAxiosInstance.get.mockResolvedValue({ data: mockWidget });
+
+      const result = await client.getWidget(1);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/widgets/1');
+      expect(result).toEqual(mockWidget);
+    });
+  });
+
+  describe('createWidget', () => {
+    it('should create a new widget', async () => {
+      const widgetData = { dashboard_id: 1, visualization_id: 1, width: 3 };
+      const mockResponse = { data: { id: 1, ...widgetData } };
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.createWidget(widgetData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/widgets', widgetData);
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('updateWidget', () => {
+    it('should update a widget', async () => {
+      const updateData = { width: 6 };
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1, ...updateData } });
+
+      const result = await client.updateWidget(1, updateData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/widgets/1', updateData);
+      expect(result.width).toBe(6);
+    });
+  });
+
+  describe('deleteWidget', () => {
+    it('should delete a widget', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.deleteWidget(1);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/widgets/1');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  // Query Snippet API Tests
+  describe('getQuerySnippets', () => {
+    it('should fetch all query snippets', async () => {
+      const mockSnippets = [{ id: 1, trigger: 'sel', snippet: 'SELECT * FROM' }];
+      mockAxiosInstance.get.mockResolvedValue({ data: mockSnippets });
+
+      const result = await client.getQuerySnippets();
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/query_snippets');
+      expect(result).toEqual(mockSnippets);
+    });
+  });
+
+  describe('getQuerySnippet', () => {
+    it('should fetch a specific query snippet', async () => {
+      const mockSnippet = { id: 1, trigger: 'sel', snippet: 'SELECT * FROM' };
+      mockAxiosInstance.get.mockResolvedValue({ data: mockSnippet });
+
+      const result = await client.getQuerySnippet(1);
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/query_snippets/1');
+      expect(result).toEqual(mockSnippet);
+    });
+  });
+
+  describe('createQuerySnippet', () => {
+    it('should create a new query snippet', async () => {
+      const snippetData = { trigger: 'sel', snippet: 'SELECT * FROM', description: 'Select all' };
+      const mockResponse = { data: { id: 1, ...snippetData } };
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.createQuerySnippet(snippetData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/query_snippets', snippetData);
+      expect(result).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('updateQuerySnippet', () => {
+    it('should update a query snippet', async () => {
+      const updateData = { snippet: 'SELECT id, name FROM' };
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1, ...updateData } });
+
+      const result = await client.updateQuerySnippet(1, updateData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/query_snippets/1', updateData);
+      expect(result.snippet).toBe('SELECT id, name FROM');
+    });
+  });
+
+  describe('deleteQuerySnippet', () => {
+    it('should delete a query snippet', async () => {
+      mockAxiosInstance.delete.mockResolvedValue({});
+
+      const result = await client.deleteQuerySnippet(1);
+
+      expect(mockAxiosInstance.delete).toHaveBeenCalledWith('/api/query_snippets/1');
+      expect(result).toEqual({ success: true });
+    });
+  });
+
+  // Destination API Tests
+  describe('getDestinations', () => {
+    it('should fetch all destinations', async () => {
+      const mockDestinations = [{ id: 1, name: 'Email', type: 'email' }];
+      mockAxiosInstance.get.mockResolvedValue({ data: mockDestinations });
+
+      const result = await client.getDestinations();
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/destinations');
+      expect(result).toEqual(mockDestinations);
+    });
+  });
 });

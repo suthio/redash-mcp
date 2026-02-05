@@ -10,7 +10,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import * as dotenv from 'dotenv';
-import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest } from "./redashClient.js";
+import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { logger, LogLevel } from "./logger.js";
 
 // Load environment variables
@@ -616,6 +616,873 @@ async function getSchema(params: z.infer<typeof getSchemaSchema>) {
   }
 }
 
+// ----- Dashboard Tools -----
+
+// Tool: create_dashboard
+const createDashboardSchema = z.object({
+  name: z.string(),
+  tags: z.array(z.string()).optional()
+});
+
+async function createDashboard(params: z.infer<typeof createDashboardSchema>) {
+  try {
+    const dashboardData: CreateDashboardRequest = {
+      name: params.name,
+      tags: params.tags || []
+    };
+    const result = await redashClient.createDashboard(dashboardData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error creating dashboard: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error creating dashboard: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: update_dashboard
+const updateDashboardSchema = z.object({
+  dashboardId: z.number(),
+  name: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  is_archived: z.boolean().optional(),
+  is_draft: z.boolean().optional(),
+  dashboard_filters_enabled: z.boolean().optional()
+});
+
+async function updateDashboard(params: z.infer<typeof updateDashboardSchema>) {
+  try {
+    const { dashboardId, ...updateData } = params;
+    const dashboardData: UpdateDashboardRequest = {};
+    if (updateData.name !== undefined) dashboardData.name = updateData.name;
+    if (updateData.tags !== undefined) dashboardData.tags = updateData.tags;
+    if (updateData.is_archived !== undefined) dashboardData.is_archived = updateData.is_archived;
+    if (updateData.is_draft !== undefined) dashboardData.is_draft = updateData.is_draft;
+    if (updateData.dashboard_filters_enabled !== undefined) dashboardData.dashboard_filters_enabled = updateData.dashboard_filters_enabled;
+
+    const result = await redashClient.updateDashboard(dashboardId, dashboardData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error updating dashboard ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error updating dashboard ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: archive_dashboard
+const archiveDashboardSchema = z.object({
+  dashboardId: z.number()
+});
+
+async function archiveDashboard(params: z.infer<typeof archiveDashboardSchema>) {
+  try {
+    const result = await redashClient.archiveDashboard(params.dashboardId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error archiving dashboard ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error archiving dashboard ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: fork_dashboard
+const forkDashboardSchema = z.object({
+  dashboardId: z.number()
+});
+
+async function forkDashboard(params: z.infer<typeof forkDashboardSchema>) {
+  try {
+    const result = await redashClient.forkDashboard(params.dashboardId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error forking dashboard ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error forking dashboard ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_public_dashboard
+const getPublicDashboardSchema = z.object({
+  token: z.string()
+});
+
+async function getPublicDashboard(params: z.infer<typeof getPublicDashboardSchema>) {
+  try {
+    const result = await redashClient.getPublicDashboard(params.token);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching public dashboard: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching public dashboard: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: share_dashboard
+const shareDashboardSchema = z.object({
+  dashboardId: z.number()
+});
+
+async function shareDashboard(params: z.infer<typeof shareDashboardSchema>) {
+  try {
+    const result = await redashClient.shareDashboard(params.dashboardId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error sharing dashboard ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error sharing dashboard ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: unshare_dashboard
+const unshareDashboardSchema = z.object({
+  dashboardId: z.number()
+});
+
+async function unshareDashboard(params: z.infer<typeof unshareDashboardSchema>) {
+  try {
+    const result = await redashClient.unshareDashboard(params.dashboardId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error unsharing dashboard ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error unsharing dashboard ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_my_dashboards
+const getMyDashboardsSchema = z.object({
+  page: z.number().optional().default(1),
+  pageSize: z.number().optional().default(25)
+});
+
+async function getMyDashboards(params: z.infer<typeof getMyDashboardsSchema>) {
+  try {
+    const result = await redashClient.getMyDashboards(params.page, params.pageSize);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching my dashboards: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching my dashboards: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_favorite_dashboards
+const getFavoriteDashboardsSchema = z.object({
+  page: z.number().optional().default(1),
+  pageSize: z.number().optional().default(25)
+});
+
+async function getFavoriteDashboards(params: z.infer<typeof getFavoriteDashboardsSchema>) {
+  try {
+    const result = await redashClient.getFavoriteDashboards(params.page, params.pageSize);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching favorite dashboards: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching favorite dashboards: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: add_dashboard_favorite
+const addDashboardFavoriteSchema = z.object({
+  dashboardId: z.number()
+});
+
+async function addDashboardFavorite(params: z.infer<typeof addDashboardFavoriteSchema>) {
+  try {
+    const result = await redashClient.addDashboardFavorite(params.dashboardId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error adding dashboard ${params.dashboardId} to favorites: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error adding dashboard ${params.dashboardId} to favorites: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: remove_dashboard_favorite
+const removeDashboardFavoriteSchema = z.object({
+  dashboardId: z.number()
+});
+
+async function removeDashboardFavorite(params: z.infer<typeof removeDashboardFavoriteSchema>) {
+  try {
+    const result = await redashClient.removeDashboardFavorite(params.dashboardId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error removing dashboard ${params.dashboardId} from favorites: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error removing dashboard ${params.dashboardId} from favorites: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_dashboard_tags
+async function getDashboardTags() {
+  try {
+    const result = await redashClient.getDashboardTags();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching dashboard tags: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching dashboard tags: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// ----- Alert Tools -----
+
+// Tool: list_alerts
+async function listAlerts() {
+  try {
+    const result = await redashClient.getAlerts();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error listing alerts: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error listing alerts: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_alert
+const getAlertSchema = z.object({
+  alertId: z.number()
+});
+
+async function getAlert(params: z.infer<typeof getAlertSchema>) {
+  try {
+    const result = await redashClient.getAlert(params.alertId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error getting alert ${params.alertId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error getting alert ${params.alertId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: create_alert
+const createAlertSchema = z.object({
+  name: z.string(),
+  query_id: z.number(),
+  options: z.object({
+    column: z.string(),
+    op: z.string(),
+    value: z.union([z.number(), z.string()]),
+    custom_subject: z.string().optional(),
+    custom_body: z.string().optional()
+  }),
+  rearm: z.number().nullable().optional()
+});
+
+async function createAlert(params: z.infer<typeof createAlertSchema>) {
+  try {
+    const alertData: CreateAlertRequest = {
+      name: params.name,
+      query_id: params.query_id,
+      options: params.options,
+      rearm: params.rearm
+    };
+    const result = await redashClient.createAlert(alertData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error creating alert: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error creating alert: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: update_alert
+const updateAlertSchema = z.object({
+  alertId: z.number(),
+  name: z.string().optional(),
+  query_id: z.number().optional(),
+  options: z.object({
+    column: z.string().optional(),
+    op: z.string().optional(),
+    value: z.union([z.number(), z.string()]).optional(),
+    custom_subject: z.string().optional(),
+    custom_body: z.string().optional()
+  }).optional(),
+  rearm: z.number().nullable().optional()
+});
+
+async function updateAlert(params: z.infer<typeof updateAlertSchema>) {
+  try {
+    const { alertId, ...updateData } = params;
+    const alertData: UpdateAlertRequest = {};
+    if (updateData.name !== undefined) alertData.name = updateData.name;
+    if (updateData.query_id !== undefined) alertData.query_id = updateData.query_id;
+    if (updateData.options !== undefined) alertData.options = updateData.options;
+    if (updateData.rearm !== undefined) alertData.rearm = updateData.rearm;
+
+    const result = await redashClient.updateAlert(alertId, alertData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error updating alert ${params.alertId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error updating alert ${params.alertId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: delete_alert
+const deleteAlertSchema = z.object({
+  alertId: z.number()
+});
+
+async function deleteAlert(params: z.infer<typeof deleteAlertSchema>) {
+  try {
+    const result = await redashClient.deleteAlert(params.alertId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error deleting alert ${params.alertId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error deleting alert ${params.alertId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: mute_alert
+const muteAlertSchema = z.object({
+  alertId: z.number()
+});
+
+async function muteAlert(params: z.infer<typeof muteAlertSchema>) {
+  try {
+    const result = await redashClient.muteAlert(params.alertId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error muting alert ${params.alertId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error muting alert ${params.alertId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_alert_subscriptions
+const getAlertSubscriptionsSchema = z.object({
+  alertId: z.number()
+});
+
+async function getAlertSubscriptions(params: z.infer<typeof getAlertSubscriptionsSchema>) {
+  try {
+    const result = await redashClient.getAlertSubscriptions(params.alertId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error getting alert ${params.alertId} subscriptions: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error getting alert ${params.alertId} subscriptions: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: add_alert_subscription
+const addAlertSubscriptionSchema = z.object({
+  alertId: z.number(),
+  destination_id: z.number().optional()
+});
+
+async function addAlertSubscription(params: z.infer<typeof addAlertSubscriptionSchema>) {
+  try {
+    const subscriptionData: CreateAlertSubscriptionRequest = {};
+    if (params.destination_id !== undefined) subscriptionData.destination_id = params.destination_id;
+
+    const result = await redashClient.addAlertSubscription(params.alertId, subscriptionData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error adding subscription to alert ${params.alertId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error adding subscription to alert ${params.alertId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: remove_alert_subscription
+const removeAlertSubscriptionSchema = z.object({
+  alertId: z.number(),
+  subscriptionId: z.number()
+});
+
+async function removeAlertSubscription(params: z.infer<typeof removeAlertSubscriptionSchema>) {
+  try {
+    const result = await redashClient.removeAlertSubscription(params.alertId, params.subscriptionId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error removing subscription ${params.subscriptionId} from alert ${params.alertId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error removing subscription ${params.subscriptionId} from alert ${params.alertId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// ----- Additional Query Tools -----
+
+// Tool: fork_query
+const forkQuerySchema = z.object({
+  queryId: z.number()
+});
+
+async function forkQuery(params: z.infer<typeof forkQuerySchema>) {
+  try {
+    const result = await redashClient.forkQuery(params.queryId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error forking query ${params.queryId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error forking query ${params.queryId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_my_queries
+const getMyQueriesSchema = z.object({
+  page: z.number().optional().default(1),
+  pageSize: z.number().optional().default(25)
+});
+
+async function getMyQueries(params: z.infer<typeof getMyQueriesSchema>) {
+  try {
+    const result = await redashClient.getMyQueries(params.page, params.pageSize);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching my queries: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching my queries: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_recent_queries
+const getRecentQueriesSchema = z.object({
+  page: z.number().optional().default(1),
+  pageSize: z.number().optional().default(25)
+});
+
+async function getRecentQueries(params: z.infer<typeof getRecentQueriesSchema>) {
+  try {
+    const result = await redashClient.getRecentQueries(params.page, params.pageSize);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching recent queries: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching recent queries: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_query_tags
+async function getQueryTags() {
+  try {
+    const result = await redashClient.getQueryTags();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching query tags: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching query tags: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_favorite_queries
+const getFavoriteQueriesSchema = z.object({
+  page: z.number().optional().default(1),
+  pageSize: z.number().optional().default(25)
+});
+
+async function getFavoriteQueries(params: z.infer<typeof getFavoriteQueriesSchema>) {
+  try {
+    const result = await redashClient.getFavoriteQueries(params.page, params.pageSize);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error fetching favorite queries: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error fetching favorite queries: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: add_query_favorite
+const addQueryFavoriteSchema = z.object({
+  queryId: z.number()
+});
+
+async function addQueryFavorite(params: z.infer<typeof addQueryFavoriteSchema>) {
+  try {
+    const result = await redashClient.addQueryFavorite(params.queryId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error adding query ${params.queryId} to favorites: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error adding query ${params.queryId} to favorites: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: remove_query_favorite
+const removeQueryFavoriteSchema = z.object({
+  queryId: z.number()
+});
+
+async function removeQueryFavorite(params: z.infer<typeof removeQueryFavoriteSchema>) {
+  try {
+    const result = await redashClient.removeQueryFavorite(params.queryId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error removing query ${params.queryId} from favorites: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error removing query ${params.queryId} from favorites: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// ----- Widget Tools -----
+
+// Tool: list_widgets
+async function listWidgets() {
+  try {
+    const result = await redashClient.getWidgets();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error listing widgets: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error listing widgets: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_widget
+const getWidgetSchema = z.object({
+  widgetId: z.number()
+});
+
+async function getWidget(params: z.infer<typeof getWidgetSchema>) {
+  try {
+    const result = await redashClient.getWidget(params.widgetId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error getting widget ${params.widgetId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error getting widget ${params.widgetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: create_widget
+const createWidgetSchema = z.object({
+  dashboard_id: z.number(),
+  visualization_id: z.number().optional(),
+  text: z.string().optional(),
+  width: z.number(),
+  options: z.any().optional()
+});
+
+async function createWidget(params: z.infer<typeof createWidgetSchema>) {
+  try {
+    const widgetData: CreateWidgetRequest = {
+      dashboard_id: params.dashboard_id,
+      visualization_id: params.visualization_id,
+      text: params.text,
+      width: params.width,
+      options: params.options || {}
+    };
+    const result = await redashClient.createWidget(widgetData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error creating widget: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error creating widget: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: update_widget
+const updateWidgetSchema = z.object({
+  widgetId: z.number(),
+  visualization_id: z.number().optional(),
+  text: z.string().optional(),
+  width: z.number().optional(),
+  options: z.any().optional()
+});
+
+async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
+  try {
+    const { widgetId, ...updateData } = params;
+    const widgetData: UpdateWidgetRequest = {};
+    if (updateData.visualization_id !== undefined) widgetData.visualization_id = updateData.visualization_id;
+    if (updateData.text !== undefined) widgetData.text = updateData.text;
+    if (updateData.width !== undefined) widgetData.width = updateData.width;
+    if (updateData.options !== undefined) widgetData.options = updateData.options;
+
+    const result = await redashClient.updateWidget(widgetId, widgetData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error updating widget ${params.widgetId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error updating widget ${params.widgetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: delete_widget
+const deleteWidgetSchema = z.object({
+  widgetId: z.number()
+});
+
+async function deleteWidget(params: z.infer<typeof deleteWidgetSchema>) {
+  try {
+    const result = await redashClient.deleteWidget(params.widgetId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error deleting widget ${params.widgetId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error deleting widget ${params.widgetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// ----- Query Snippet Tools -----
+
+// Tool: list_query_snippets
+async function listQuerySnippets() {
+  try {
+    const result = await redashClient.getQuerySnippets();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error listing query snippets: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error listing query snippets: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_query_snippet
+const getQuerySnippetSchema = z.object({
+  snippetId: z.number()
+});
+
+async function getQuerySnippet(params: z.infer<typeof getQuerySnippetSchema>) {
+  try {
+    const result = await redashClient.getQuerySnippet(params.snippetId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error getting query snippet ${params.snippetId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error getting query snippet ${params.snippetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: create_query_snippet
+const createQuerySnippetSchema = z.object({
+  trigger: z.string(),
+  description: z.string().optional(),
+  snippet: z.string()
+});
+
+async function createQuerySnippet(params: z.infer<typeof createQuerySnippetSchema>) {
+  try {
+    const snippetData: CreateQuerySnippetRequest = {
+      trigger: params.trigger,
+      description: params.description,
+      snippet: params.snippet
+    };
+    const result = await redashClient.createQuerySnippet(snippetData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error creating query snippet: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error creating query snippet: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: update_query_snippet
+const updateQuerySnippetSchema = z.object({
+  snippetId: z.number(),
+  trigger: z.string().optional(),
+  description: z.string().optional(),
+  snippet: z.string().optional()
+});
+
+async function updateQuerySnippet(params: z.infer<typeof updateQuerySnippetSchema>) {
+  try {
+    const { snippetId, ...updateData } = params;
+    const snippetData: UpdateQuerySnippetRequest = {};
+    if (updateData.trigger !== undefined) snippetData.trigger = updateData.trigger;
+    if (updateData.description !== undefined) snippetData.description = updateData.description;
+    if (updateData.snippet !== undefined) snippetData.snippet = updateData.snippet;
+
+    const result = await redashClient.updateQuerySnippet(snippetId, snippetData);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error updating query snippet ${params.snippetId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error updating query snippet ${params.snippetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: delete_query_snippet
+const deleteQuerySnippetSchema = z.object({
+  snippetId: z.number()
+});
+
+async function deleteQuerySnippet(params: z.infer<typeof deleteQuerySnippetSchema>) {
+  try {
+    const result = await redashClient.deleteQuerySnippet(params.snippetId);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error deleting query snippet ${params.snippetId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error deleting query snippet ${params.snippetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// ----- Destination Tools -----
+
+// Tool: list_destinations
+async function listDestinations() {
+  try {
+    const result = await redashClient.getDestinations();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error listing destinations: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error listing destinations: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+
 // ----- Resources Implementation -----
 
 // List available resources
@@ -909,6 +1776,472 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["dataSourceId"],
         },
+      },
+      // Dashboard tools
+      {
+        name: "create_dashboard",
+        description: "Create a new dashboard in Redash",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the dashboard" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags for the dashboard" }
+          },
+          required: ["name"]
+        }
+      },
+      {
+        name: "update_dashboard",
+        description: "Update an existing dashboard in Redash",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard to update" },
+            name: { type: "string", description: "New name of the dashboard" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags for the dashboard" },
+            is_archived: { type: "boolean", description: "Whether the dashboard is archived" },
+            is_draft: { type: "boolean", description: "Whether the dashboard is a draft" },
+            dashboard_filters_enabled: { type: "boolean", description: "Whether dashboard filters are enabled" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "archive_dashboard",
+        description: "Archive (soft-delete) a dashboard in Redash",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard to archive" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "fork_dashboard",
+        description: "Fork (duplicate) an existing dashboard",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard to fork" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "get_public_dashboard",
+        description: "Get a public dashboard by its share token",
+        inputSchema: {
+          type: "object",
+          properties: {
+            token: { type: "string", description: "Public share token of the dashboard" }
+          },
+          required: ["token"]
+        }
+      },
+      {
+        name: "share_dashboard",
+        description: "Share a dashboard and create a public link",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard to share" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "unshare_dashboard",
+        description: "Unshare a dashboard and revoke its public link",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard to unshare" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "get_my_dashboards",
+        description: "Get dashboards created by the current user",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page: { type: "number", description: "Page number (starts at 1)" },
+            pageSize: { type: "number", description: "Number of results per page" }
+          }
+        }
+      },
+      {
+        name: "get_favorite_dashboards",
+        description: "Get dashboards marked as favorite by the current user",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page: { type: "number", description: "Page number (starts at 1)" },
+            pageSize: { type: "number", description: "Number of results per page" }
+          }
+        }
+      },
+      {
+        name: "add_dashboard_favorite",
+        description: "Add a dashboard to favorites",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard to add to favorites" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "remove_dashboard_favorite",
+        description: "Remove a dashboard from favorites",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard to remove from favorites" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "get_dashboard_tags",
+        description: "Get all tags used in dashboards",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      // Alert tools
+      {
+        name: "list_alerts",
+        description: "List all alerts in Redash",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "get_alert",
+        description: "Get details of a specific alert",
+        inputSchema: {
+          type: "object",
+          properties: {
+            alertId: { type: "number", description: "ID of the alert to get" }
+          },
+          required: ["alertId"]
+        }
+      },
+      {
+        name: "create_alert",
+        description: "Create a new alert in Redash. Alerts notify you when a query result meets a specified condition.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the alert" },
+            query_id: { type: "number", description: "ID of the query to monitor" },
+            options: {
+              type: "object",
+              description: "Alert options including column to monitor, operator (e.g., 'greater than', 'less than', 'equals'), and threshold value",
+              properties: {
+                column: { type: "string", description: "Column name to monitor" },
+                op: { type: "string", description: "Comparison operator: 'greater than', 'less than', 'equals', 'not equals', etc." },
+                value: { type: ["number", "string"], description: "Threshold value to compare against" },
+                custom_subject: { type: "string", description: "Custom email subject" },
+                custom_body: { type: "string", description: "Custom email body" }
+              },
+              required: ["column", "op", "value"]
+            },
+            rearm: { type: ["number", "null"], description: "Number of seconds to wait before triggering again (null for never)" }
+          },
+          required: ["name", "query_id", "options"]
+        }
+      },
+      {
+        name: "update_alert",
+        description: "Update an existing alert in Redash",
+        inputSchema: {
+          type: "object",
+          properties: {
+            alertId: { type: "number", description: "ID of the alert to update" },
+            name: { type: "string", description: "New name of the alert" },
+            query_id: { type: "number", description: "ID of the query to monitor" },
+            options: {
+              type: "object",
+              description: "Alert options",
+              properties: {
+                column: { type: "string", description: "Column name to monitor" },
+                op: { type: "string", description: "Comparison operator" },
+                value: { type: ["number", "string"], description: "Threshold value" },
+                custom_subject: { type: "string", description: "Custom email subject" },
+                custom_body: { type: "string", description: "Custom email body" }
+              }
+            },
+            rearm: { type: ["number", "null"], description: "Number of seconds to wait before triggering again" }
+          },
+          required: ["alertId"]
+        }
+      },
+      {
+        name: "delete_alert",
+        description: "Delete an alert from Redash",
+        inputSchema: {
+          type: "object",
+          properties: {
+            alertId: { type: "number", description: "ID of the alert to delete" }
+          },
+          required: ["alertId"]
+        }
+      },
+      {
+        name: "mute_alert",
+        description: "Mute an alert to temporarily stop notifications",
+        inputSchema: {
+          type: "object",
+          properties: {
+            alertId: { type: "number", description: "ID of the alert to mute" }
+          },
+          required: ["alertId"]
+        }
+      },
+      {
+        name: "get_alert_subscriptions",
+        description: "Get all subscriptions for an alert",
+        inputSchema: {
+          type: "object",
+          properties: {
+            alertId: { type: "number", description: "ID of the alert" }
+          },
+          required: ["alertId"]
+        }
+      },
+      {
+        name: "add_alert_subscription",
+        description: "Subscribe to an alert to receive notifications",
+        inputSchema: {
+          type: "object",
+          properties: {
+            alertId: { type: "number", description: "ID of the alert to subscribe to" },
+            destination_id: { type: "number", description: "ID of the notification destination (optional, defaults to email)" }
+          },
+          required: ["alertId"]
+        }
+      },
+      {
+        name: "remove_alert_subscription",
+        description: "Unsubscribe from an alert",
+        inputSchema: {
+          type: "object",
+          properties: {
+            alertId: { type: "number", description: "ID of the alert" },
+            subscriptionId: { type: "number", description: "ID of the subscription to remove" }
+          },
+          required: ["alertId", "subscriptionId"]
+        }
+      },
+      // Additional Query tools
+      {
+        name: "fork_query",
+        description: "Fork (duplicate) an existing query",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queryId: { type: "number", description: "ID of the query to fork" }
+          },
+          required: ["queryId"]
+        }
+      },
+      {
+        name: "get_my_queries",
+        description: "Get queries created by the current user",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page: { type: "number", description: "Page number (starts at 1)" },
+            pageSize: { type: "number", description: "Number of results per page" }
+          }
+        }
+      },
+      {
+        name: "get_recent_queries",
+        description: "Get recently accessed queries",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page: { type: "number", description: "Page number (starts at 1)" },
+            pageSize: { type: "number", description: "Number of results per page" }
+          }
+        }
+      },
+      {
+        name: "get_query_tags",
+        description: "Get all tags used in queries",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "get_favorite_queries",
+        description: "Get queries marked as favorite by the current user",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page: { type: "number", description: "Page number (starts at 1)" },
+            pageSize: { type: "number", description: "Number of results per page" }
+          }
+        }
+      },
+      {
+        name: "add_query_favorite",
+        description: "Add a query to favorites",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queryId: { type: "number", description: "ID of the query to add to favorites" }
+          },
+          required: ["queryId"]
+        }
+      },
+      {
+        name: "remove_query_favorite",
+        description: "Remove a query from favorites",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queryId: { type: "number", description: "ID of the query to remove from favorites" }
+          },
+          required: ["queryId"]
+        }
+      },
+      // Widget tools
+      {
+        name: "list_widgets",
+        description: "List all widgets",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "get_widget",
+        description: "Get details of a specific widget",
+        inputSchema: {
+          type: "object",
+          properties: {
+            widgetId: { type: "number", description: "ID of the widget to get" }
+          },
+          required: ["widgetId"]
+        }
+      },
+      {
+        name: "create_widget",
+        description: "Create a new widget on a dashboard",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboard_id: { type: "number", description: "ID of the dashboard to add the widget to" },
+            visualization_id: { type: "number", description: "ID of the visualization to display (optional if text widget)" },
+            text: { type: "string", description: "Text content for text widgets" },
+            width: { type: "number", description: "Width of the widget (1-6)" },
+            options: { type: "object", description: "Widget options" }
+          },
+          required: ["dashboard_id", "width"]
+        }
+      },
+      {
+        name: "update_widget",
+        description: "Update an existing widget",
+        inputSchema: {
+          type: "object",
+          properties: {
+            widgetId: { type: "number", description: "ID of the widget to update" },
+            visualization_id: { type: "number", description: "ID of the visualization to display" },
+            text: { type: "string", description: "Text content for text widgets" },
+            width: { type: "number", description: "Width of the widget (1-6)" },
+            options: { type: "object", description: "Widget options" }
+          },
+          required: ["widgetId"]
+        }
+      },
+      {
+        name: "delete_widget",
+        description: "Delete a widget from a dashboard",
+        inputSchema: {
+          type: "object",
+          properties: {
+            widgetId: { type: "number", description: "ID of the widget to delete" }
+          },
+          required: ["widgetId"]
+        }
+      },
+      // Query Snippet tools
+      {
+        name: "list_query_snippets",
+        description: "List all reusable query snippets",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
+        name: "get_query_snippet",
+        description: "Get details of a specific query snippet",
+        inputSchema: {
+          type: "object",
+          properties: {
+            snippetId: { type: "number", description: "ID of the snippet to get" }
+          },
+          required: ["snippetId"]
+        }
+      },
+      {
+        name: "create_query_snippet",
+        description: "Create a new reusable query snippet",
+        inputSchema: {
+          type: "object",
+          properties: {
+            trigger: { type: "string", description: "Trigger keyword for the snippet" },
+            description: { type: "string", description: "Description of the snippet" },
+            snippet: { type: "string", description: "The SQL snippet content" }
+          },
+          required: ["trigger", "snippet"]
+        }
+      },
+      {
+        name: "update_query_snippet",
+        description: "Update an existing query snippet",
+        inputSchema: {
+          type: "object",
+          properties: {
+            snippetId: { type: "number", description: "ID of the snippet to update" },
+            trigger: { type: "string", description: "Trigger keyword for the snippet" },
+            description: { type: "string", description: "Description of the snippet" },
+            snippet: { type: "string", description: "The SQL snippet content" }
+          },
+          required: ["snippetId"]
+        }
+      },
+      {
+        name: "delete_query_snippet",
+        description: "Delete a query snippet",
+        inputSchema: {
+          type: "object",
+          properties: {
+            snippetId: { type: "number", description: "ID of the snippet to delete" }
+          },
+          required: ["snippetId"]
+        }
+      },
+      // Destination tools
+      {
+        name: "list_destinations",
+        description: "List all alert notification destinations (email, Slack, etc.)",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
       }
     ]
   };
@@ -1013,6 +2346,168 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_schema":
         logger.debug(`Handling get_schema`);
         return await getSchema(getSchemaSchema.parse(args));
+
+      // Dashboard tools
+      case "create_dashboard":
+        logger.debug(`Handling create_dashboard`);
+        return await createDashboard(createDashboardSchema.parse(args));
+
+      case "update_dashboard":
+        logger.debug(`Handling update_dashboard`);
+        return await updateDashboard(updateDashboardSchema.parse(args));
+
+      case "archive_dashboard":
+        logger.debug(`Handling archive_dashboard`);
+        return await archiveDashboard(archiveDashboardSchema.parse(args));
+
+      case "fork_dashboard":
+        logger.debug(`Handling fork_dashboard`);
+        return await forkDashboard(forkDashboardSchema.parse(args));
+
+      case "get_public_dashboard":
+        logger.debug(`Handling get_public_dashboard`);
+        return await getPublicDashboard(getPublicDashboardSchema.parse(args));
+
+      case "share_dashboard":
+        logger.debug(`Handling share_dashboard`);
+        return await shareDashboard(shareDashboardSchema.parse(args));
+
+      case "unshare_dashboard":
+        logger.debug(`Handling unshare_dashboard`);
+        return await unshareDashboard(unshareDashboardSchema.parse(args));
+
+      case "get_my_dashboards":
+        logger.debug(`Handling get_my_dashboards`);
+        return await getMyDashboards(getMyDashboardsSchema.parse(args));
+
+      case "get_favorite_dashboards":
+        logger.debug(`Handling get_favorite_dashboards`);
+        return await getFavoriteDashboards(getFavoriteDashboardsSchema.parse(args));
+
+      case "add_dashboard_favorite":
+        logger.debug(`Handling add_dashboard_favorite`);
+        return await addDashboardFavorite(addDashboardFavoriteSchema.parse(args));
+
+      case "remove_dashboard_favorite":
+        logger.debug(`Handling remove_dashboard_favorite`);
+        return await removeDashboardFavorite(removeDashboardFavoriteSchema.parse(args));
+
+      case "get_dashboard_tags":
+        logger.debug(`Handling get_dashboard_tags`);
+        return await getDashboardTags();
+
+      // Alert tools
+      case "list_alerts":
+        logger.debug(`Handling list_alerts`);
+        return await listAlerts();
+
+      case "get_alert":
+        logger.debug(`Handling get_alert`);
+        return await getAlert(getAlertSchema.parse(args));
+
+      case "create_alert":
+        logger.debug(`Handling create_alert`);
+        return await createAlert(createAlertSchema.parse(args));
+
+      case "update_alert":
+        logger.debug(`Handling update_alert`);
+        return await updateAlert(updateAlertSchema.parse(args));
+
+      case "delete_alert":
+        logger.debug(`Handling delete_alert`);
+        return await deleteAlert(deleteAlertSchema.parse(args));
+
+      case "mute_alert":
+        logger.debug(`Handling mute_alert`);
+        return await muteAlert(muteAlertSchema.parse(args));
+
+      case "get_alert_subscriptions":
+        logger.debug(`Handling get_alert_subscriptions`);
+        return await getAlertSubscriptions(getAlertSubscriptionsSchema.parse(args));
+
+      case "add_alert_subscription":
+        logger.debug(`Handling add_alert_subscription`);
+        return await addAlertSubscription(addAlertSubscriptionSchema.parse(args));
+
+      case "remove_alert_subscription":
+        logger.debug(`Handling remove_alert_subscription`);
+        return await removeAlertSubscription(removeAlertSubscriptionSchema.parse(args));
+
+      // Additional Query tools
+      case "fork_query":
+        logger.debug(`Handling fork_query`);
+        return await forkQuery(forkQuerySchema.parse(args));
+
+      case "get_my_queries":
+        logger.debug(`Handling get_my_queries`);
+        return await getMyQueries(getMyQueriesSchema.parse(args));
+
+      case "get_recent_queries":
+        logger.debug(`Handling get_recent_queries`);
+        return await getRecentQueries(getRecentQueriesSchema.parse(args));
+
+      case "get_query_tags":
+        logger.debug(`Handling get_query_tags`);
+        return await getQueryTags();
+
+      case "get_favorite_queries":
+        logger.debug(`Handling get_favorite_queries`);
+        return await getFavoriteQueries(getFavoriteQueriesSchema.parse(args));
+
+      case "add_query_favorite":
+        logger.debug(`Handling add_query_favorite`);
+        return await addQueryFavorite(addQueryFavoriteSchema.parse(args));
+
+      case "remove_query_favorite":
+        logger.debug(`Handling remove_query_favorite`);
+        return await removeQueryFavorite(removeQueryFavoriteSchema.parse(args));
+
+      // Widget tools
+      case "list_widgets":
+        logger.debug(`Handling list_widgets`);
+        return await listWidgets();
+
+      case "get_widget":
+        logger.debug(`Handling get_widget`);
+        return await getWidget(getWidgetSchema.parse(args));
+
+      case "create_widget":
+        logger.debug(`Handling create_widget`);
+        return await createWidget(createWidgetSchema.parse(args));
+
+      case "update_widget":
+        logger.debug(`Handling update_widget`);
+        return await updateWidget(updateWidgetSchema.parse(args));
+
+      case "delete_widget":
+        logger.debug(`Handling delete_widget`);
+        return await deleteWidget(deleteWidgetSchema.parse(args));
+
+      // Query Snippet tools
+      case "list_query_snippets":
+        logger.debug(`Handling list_query_snippets`);
+        return await listQuerySnippets();
+
+      case "get_query_snippet":
+        logger.debug(`Handling get_query_snippet`);
+        return await getQuerySnippet(getQuerySnippetSchema.parse(args));
+
+      case "create_query_snippet":
+        logger.debug(`Handling create_query_snippet`);
+        return await createQuerySnippet(createQuerySnippetSchema.parse(args));
+
+      case "update_query_snippet":
+        logger.debug(`Handling update_query_snippet`);
+        return await updateQuerySnippet(updateQuerySnippetSchema.parse(args));
+
+      case "delete_query_snippet":
+        logger.debug(`Handling delete_query_snippet`);
+        return await deleteQuerySnippet(deleteQuerySnippetSchema.parse(args));
+
+      // Destination tools
+      case "list_destinations":
+        logger.debug(`Handling list_destinations`);
+        return await listDestinations();
 
       default:
         logger.error(`Unknown tool requested: ${name}`);
