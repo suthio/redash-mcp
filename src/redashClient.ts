@@ -255,16 +255,6 @@ export interface RedashDestination {
   options: any;
 }
 
-// Event interface
-export interface RedashEvent {
-  id: number;
-  action: string;
-  object_type: string;
-  object_id: number;
-  created_at: string;
-  user_id: number;
-}
-
 // RedashClient class for API communication
 export class RedashClient {
   private client: AxiosInstance;
@@ -1213,26 +1203,6 @@ export class RedashClient {
     } catch (error) {
       logger.error(`Error fetching destinations: ${error}`);
       throw new Error(`Failed to fetch destinations: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  // ----- Event API Methods -----
-
-  // Get events
-  async getEvents(page = 1, pageSize = 25): Promise<{ count: number; page: number; pageSize: number; results: RedashEvent[] }> {
-    try {
-      const response = await this.client.get('/api/events', {
-        params: { page, page_size: pageSize }
-      });
-      return {
-        count: response.data.count,
-        page: response.data.page,
-        pageSize: response.data.page_size,
-        results: response.data.results
-      };
-    } catch (error) {
-      logger.error(`Error fetching events: ${error}`);
-      throw new Error(`Failed to fetch events: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
