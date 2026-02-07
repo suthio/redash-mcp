@@ -120,6 +120,141 @@ export interface RedashSchema {
   }>;
 }
 
+// Dashboard interfaces
+export interface CreateDashboardRequest {
+  name: string;
+  tags?: string[];
+}
+
+export interface UpdateDashboardRequest {
+  name?: string;
+  tags?: string[];
+  is_archived?: boolean;
+  is_draft?: boolean;
+  dashboard_filters_enabled?: boolean;
+}
+
+// Alert interfaces
+export interface RedashAlert {
+  id: number;
+  name: string;
+  query_id: number;
+  options: {
+    column: string;
+    op: string;
+    value: number | string;
+    custom_subject?: string;
+    custom_body?: string;
+    muted?: boolean;
+  };
+  state: string;
+  last_triggered_at: string | null;
+  rearm: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAlertRequest {
+  name: string;
+  query_id: number;
+  options: {
+    column: string;
+    op: string;
+    value: number | string;
+    custom_subject?: string;
+    custom_body?: string;
+  };
+  rearm?: number | null;
+}
+
+export interface UpdateAlertRequest {
+  name?: string;
+  query_id?: number;
+  options?: {
+    column?: string;
+    op?: string;
+    value?: number | string;
+    custom_subject?: string;
+    custom_body?: string;
+  };
+  rearm?: number | null;
+}
+
+export interface AlertSubscription {
+  id: number;
+  alert_id: number;
+  user?: {
+    id: number;
+    name: string;
+    email: string;
+  };
+  destination?: {
+    id: number;
+    name: string;
+    type: string;
+  };
+}
+
+export interface CreateAlertSubscriptionRequest {
+  destination_id?: number;
+}
+
+// Widget interfaces
+export interface RedashWidget {
+  id: number;
+  dashboard_id: number;
+  visualization_id?: number;
+  visualization?: RedashVisualization;
+  text?: string;
+  width: number;
+  options: any;
+}
+
+export interface CreateWidgetRequest {
+  dashboard_id: number;
+  visualization_id?: number;
+  text?: string;
+  width: number;
+  options?: any;
+}
+
+export interface UpdateWidgetRequest {
+  visualization_id?: number;
+  text?: string;
+  width?: number;
+  options?: any;
+}
+
+// Query Snippet interfaces
+export interface RedashQuerySnippet {
+  id: number;
+  trigger: string;
+  description: string;
+  snippet: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateQuerySnippetRequest {
+  trigger: string;
+  description?: string;
+  snippet: string;
+}
+
+export interface UpdateQuerySnippetRequest {
+  trigger?: string;
+  description?: string;
+  snippet?: string;
+}
+
+// Destination interface
+export interface RedashDestination {
+  id: number;
+  name: string;
+  type: string;
+  options: any;
+}
+
 // RedashClient class for API communication
 export class RedashClient {
   private client: AxiosInstance;
@@ -592,6 +727,482 @@ export class RedashClient {
       throw new Error(
         `Failed to fetch data source ${dataSourceId} schema from Redash`
       );
+    }
+  }
+
+  // ----- Dashboard API Methods -----
+
+  // Create a new dashboard
+  async createDashboard(data: CreateDashboardRequest): Promise<RedashDashboard> {
+    try {
+      const response = await this.client.post('/api/dashboards', data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error creating dashboard: ${error}`);
+      throw new Error(`Failed to create dashboard: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Update an existing dashboard
+  async updateDashboard(dashboardId: number, data: UpdateDashboardRequest): Promise<RedashDashboard> {
+    try {
+      const response = await this.client.post(`/api/dashboards/${dashboardId}`, data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error updating dashboard ${dashboardId}: ${error}`);
+      throw new Error(`Failed to update dashboard ${dashboardId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Archive (soft delete) a dashboard
+  async archiveDashboard(dashboardId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/dashboards/${dashboardId}`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error archiving dashboard ${dashboardId}: ${error}`);
+      throw new Error(`Failed to archive dashboard ${dashboardId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Fork a dashboard
+  async forkDashboard(dashboardId: number): Promise<RedashDashboard> {
+    try {
+      const response = await this.client.post(`/api/dashboards/${dashboardId}/fork`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error forking dashboard ${dashboardId}: ${error}`);
+      throw new Error(`Failed to fork dashboard ${dashboardId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get public dashboard by token
+  async getPublicDashboard(token: string): Promise<RedashDashboard> {
+    try {
+      const response = await this.client.get(`/api/dashboards/public/${token}`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching public dashboard: ${error}`);
+      throw new Error(`Failed to fetch public dashboard: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Share a dashboard (create public link)
+  async shareDashboard(dashboardId: number): Promise<{ public_url: string; api_key: string }> {
+    try {
+      const response = await this.client.post(`/api/dashboards/${dashboardId}/share`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error sharing dashboard ${dashboardId}: ${error}`);
+      throw new Error(`Failed to share dashboard ${dashboardId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Unshare a dashboard (revoke public link)
+  async unshareDashboard(dashboardId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/dashboards/${dashboardId}/share`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error unsharing dashboard ${dashboardId}: ${error}`);
+      throw new Error(`Failed to unshare dashboard ${dashboardId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get current user's dashboards
+  async getMyDashboards(page = 1, pageSize = 25): Promise<{ count: number; page: number; pageSize: number; results: RedashDashboard[] }> {
+    try {
+      const response = await this.client.get('/api/dashboards/my', {
+        params: { page, page_size: pageSize }
+      });
+      return {
+        count: response.data.count,
+        page: response.data.page,
+        pageSize: response.data.page_size,
+        results: response.data.results
+      };
+    } catch (error) {
+      logger.error(`Error fetching my dashboards: ${error}`);
+      throw new Error(`Failed to fetch my dashboards: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get favorite dashboards
+  async getFavoriteDashboards(page = 1, pageSize = 25): Promise<{ count: number; page: number; pageSize: number; results: RedashDashboard[] }> {
+    try {
+      const response = await this.client.get('/api/dashboards/favorites', {
+        params: { page, page_size: pageSize }
+      });
+      return {
+        count: response.data.count,
+        page: response.data.page,
+        pageSize: response.data.page_size,
+        results: response.data.results
+      };
+    } catch (error) {
+      logger.error(`Error fetching favorite dashboards: ${error}`);
+      throw new Error(`Failed to fetch favorite dashboards: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Add dashboard to favorites
+  async addDashboardFavorite(dashboardId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.post(`/api/dashboards/${dashboardId}/favorite`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error adding dashboard ${dashboardId} to favorites: ${error}`);
+      throw new Error(`Failed to add dashboard ${dashboardId} to favorites: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Remove dashboard from favorites
+  async removeDashboardFavorite(dashboardId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/dashboards/${dashboardId}/favorite`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error removing dashboard ${dashboardId} from favorites: ${error}`);
+      throw new Error(`Failed to remove dashboard ${dashboardId} from favorites: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get all dashboard tags
+  async getDashboardTags(): Promise<{ tags: Array<{ name: string; count: number }> }> {
+    try {
+      const response = await this.client.get('/api/dashboards/tags');
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching dashboard tags: ${error}`);
+      throw new Error(`Failed to fetch dashboard tags: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ----- Alert API Methods -----
+
+  // Get all alerts
+  async getAlerts(): Promise<RedashAlert[]> {
+    try {
+      const response = await this.client.get('/api/alerts');
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching alerts: ${error}`);
+      throw new Error(`Failed to fetch alerts: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get a specific alert by ID
+  async getAlert(alertId: number): Promise<RedashAlert> {
+    try {
+      const response = await this.client.get(`/api/alerts/${alertId}`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching alert ${alertId}: ${error}`);
+      throw new Error(`Failed to fetch alert ${alertId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Create a new alert
+  async createAlert(data: CreateAlertRequest): Promise<RedashAlert> {
+    try {
+      const response = await this.client.post('/api/alerts', data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error creating alert: ${error}`);
+      throw new Error(`Failed to create alert: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Update an existing alert
+  async updateAlert(alertId: number, data: UpdateAlertRequest): Promise<RedashAlert> {
+    try {
+      const response = await this.client.post(`/api/alerts/${alertId}`, data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error updating alert ${alertId}: ${error}`);
+      throw new Error(`Failed to update alert ${alertId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Delete an alert
+  async deleteAlert(alertId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/alerts/${alertId}`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error deleting alert ${alertId}: ${error}`);
+      throw new Error(`Failed to delete alert ${alertId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Mute an alert
+  async muteAlert(alertId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.post(`/api/alerts/${alertId}/mute`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error muting alert ${alertId}: ${error}`);
+      throw new Error(`Failed to mute alert ${alertId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get alert subscriptions
+  async getAlertSubscriptions(alertId: number): Promise<AlertSubscription[]> {
+    try {
+      const response = await this.client.get(`/api/alerts/${alertId}/subscriptions`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching alert ${alertId} subscriptions: ${error}`);
+      throw new Error(`Failed to fetch alert ${alertId} subscriptions: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Add alert subscription
+  async addAlertSubscription(alertId: number, data?: CreateAlertSubscriptionRequest): Promise<AlertSubscription> {
+    try {
+      const response = await this.client.post(`/api/alerts/${alertId}/subscriptions`, data || {});
+      return response.data;
+    } catch (error) {
+      logger.error(`Error adding subscription to alert ${alertId}: ${error}`);
+      throw new Error(`Failed to add subscription to alert ${alertId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Remove alert subscription
+  async removeAlertSubscription(alertId: number, subscriptionId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/alerts/${alertId}/subscriptions/${subscriptionId}`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error removing subscription ${subscriptionId} from alert ${alertId}: ${error}`);
+      throw new Error(`Failed to remove subscription ${subscriptionId} from alert ${alertId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ----- Additional Query API Methods -----
+
+  // Fork a query
+  async forkQuery(queryId: number): Promise<RedashQuery> {
+    try {
+      const response = await this.client.post(`/api/queries/${queryId}/fork`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error forking query ${queryId}: ${error}`);
+      throw new Error(`Failed to fork query ${queryId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get current user's queries
+  async getMyQueries(page = 1, pageSize = 25): Promise<{ count: number; page: number; pageSize: number; results: RedashQuery[] }> {
+    try {
+      const response = await this.client.get('/api/queries/my', {
+        params: { page, page_size: pageSize }
+      });
+      return {
+        count: response.data.count,
+        page: response.data.page,
+        pageSize: response.data.page_size,
+        results: response.data.results
+      };
+    } catch (error) {
+      logger.error(`Error fetching my queries: ${error}`);
+      throw new Error(`Failed to fetch my queries: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get recent queries
+  async getRecentQueries(page = 1, pageSize = 25): Promise<{ count: number; page: number; pageSize: number; results: RedashQuery[] }> {
+    try {
+      const response = await this.client.get('/api/queries/recent', {
+        params: { page, page_size: pageSize }
+      });
+      return {
+        count: response.data.count,
+        page: response.data.page,
+        pageSize: response.data.page_size,
+        results: response.data.results
+      };
+    } catch (error) {
+      logger.error(`Error fetching recent queries: ${error}`);
+      throw new Error(`Failed to fetch recent queries: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get query tags
+  async getQueryTags(): Promise<{ tags: Array<{ name: string; count: number }> }> {
+    try {
+      const response = await this.client.get('/api/queries/tags');
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching query tags: ${error}`);
+      throw new Error(`Failed to fetch query tags: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get favorite queries
+  async getFavoriteQueries(page = 1, pageSize = 25): Promise<{ count: number; page: number; pageSize: number; results: RedashQuery[] }> {
+    try {
+      const response = await this.client.get('/api/queries/favorites', {
+        params: { page, page_size: pageSize }
+      });
+      return {
+        count: response.data.count,
+        page: response.data.page,
+        pageSize: response.data.page_size,
+        results: response.data.results
+      };
+    } catch (error) {
+      logger.error(`Error fetching favorite queries: ${error}`);
+      throw new Error(`Failed to fetch favorite queries: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Add query to favorites
+  async addQueryFavorite(queryId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.post(`/api/queries/${queryId}/favorite`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error adding query ${queryId} to favorites: ${error}`);
+      throw new Error(`Failed to add query ${queryId} to favorites: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Remove query from favorites
+  async removeQueryFavorite(queryId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/queries/${queryId}/favorite`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error removing query ${queryId} from favorites: ${error}`);
+      throw new Error(`Failed to remove query ${queryId} from favorites: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ----- Widget API Methods -----
+
+  // Get all widgets
+  async getWidgets(): Promise<RedashWidget[]> {
+    try {
+      const response = await this.client.get('/api/widgets');
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching widgets: ${error}`);
+      throw new Error(`Failed to fetch widgets: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get a specific widget by ID
+  async getWidget(widgetId: number): Promise<RedashWidget> {
+    try {
+      const response = await this.client.get(`/api/widgets/${widgetId}`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching widget ${widgetId}: ${error}`);
+      throw new Error(`Failed to fetch widget ${widgetId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Create a new widget
+  async createWidget(data: CreateWidgetRequest): Promise<RedashWidget> {
+    try {
+      const response = await this.client.post('/api/widgets', data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error creating widget: ${error}`);
+      throw new Error(`Failed to create widget: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Update an existing widget
+  async updateWidget(widgetId: number, data: UpdateWidgetRequest): Promise<RedashWidget> {
+    try {
+      const response = await this.client.post(`/api/widgets/${widgetId}`, data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error updating widget ${widgetId}: ${error}`);
+      throw new Error(`Failed to update widget ${widgetId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Delete a widget
+  async deleteWidget(widgetId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/widgets/${widgetId}`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error deleting widget ${widgetId}: ${error}`);
+      throw new Error(`Failed to delete widget ${widgetId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ----- Query Snippet API Methods -----
+
+  // Get all query snippets
+  async getQuerySnippets(): Promise<RedashQuerySnippet[]> {
+    try {
+      const response = await this.client.get('/api/query_snippets');
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching query snippets: ${error}`);
+      throw new Error(`Failed to fetch query snippets: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Get a specific query snippet by ID
+  async getQuerySnippet(snippetId: number): Promise<RedashQuerySnippet> {
+    try {
+      const response = await this.client.get(`/api/query_snippets/${snippetId}`);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching query snippet ${snippetId}: ${error}`);
+      throw new Error(`Failed to fetch query snippet ${snippetId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Create a new query snippet
+  async createQuerySnippet(data: CreateQuerySnippetRequest): Promise<RedashQuerySnippet> {
+    try {
+      const response = await this.client.post('/api/query_snippets', data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error creating query snippet: ${error}`);
+      throw new Error(`Failed to create query snippet: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Update an existing query snippet
+  async updateQuerySnippet(snippetId: number, data: UpdateQuerySnippetRequest): Promise<RedashQuerySnippet> {
+    try {
+      const response = await this.client.post(`/api/query_snippets/${snippetId}`, data);
+      return response.data;
+    } catch (error) {
+      logger.error(`Error updating query snippet ${snippetId}: ${error}`);
+      throw new Error(`Failed to update query snippet ${snippetId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Delete a query snippet
+  async deleteQuerySnippet(snippetId: number): Promise<{ success: boolean }> {
+    try {
+      await this.client.delete(`/api/query_snippets/${snippetId}`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`Error deleting query snippet ${snippetId}: ${error}`);
+      throw new Error(`Failed to delete query snippet ${snippetId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ----- Destination API Methods -----
+
+  // Get all destinations
+  async getDestinations(): Promise<RedashDestination[]> {
+    try {
+      const response = await this.client.get('/api/destinations');
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching destinations: ${error}`);
+      throw new Error(`Failed to fetch destinations: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
