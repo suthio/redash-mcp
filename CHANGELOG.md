@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.9](https://github.com/suthio/redash-mcp/compare/v0.0.8...v0.0.9) - 2026-02-07
+- Add Dashboard, Alert, Widget, Query Snippet APIs by @dtaniwaki in https://github.com/suthio/redash-mcp/pull/27
+
 ## [v0.0.8](https://github.com/suthio/redash-mcp/compare/v0.0.7...v0.0.8) - 2026-01-13
 - Add tests by @dtaniwaki in https://github.com/suthio/redash-mcp/pull/25
 
