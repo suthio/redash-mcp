@@ -1,5 +1,8 @@
 # Changelog
 
+## [v0.0.10](https://github.com/suthio/redash-mcp/compare/v0.0.9...v0.0.10) - 2026-03-05
+- Fix API key leakage in error logs (fixes #1) by @deemoowoor in https://github.com/suthio/redash-mcp/pull/32
+
 ## [v0.0.9](https://github.com/suthio/redash-mcp/compare/v0.0.8...v0.0.9) - 2026-02-07
 - Add Dashboard, Alert, Widget, Query Snippet APIs by @dtaniwaki in https://github.com/suthio/redash-mcp/pull/27
 
