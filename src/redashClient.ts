@@ -385,7 +385,7 @@ export class RedashClient {
         logger.error(`Request config: ${JSON.stringify({
           url: axiosError.config?.url,
           method: axiosError.config?.method,
-          headers: axiosError.config?.headers,
+          
           data: axiosError.config?.data
         }, null, 2)}`);
 
@@ -434,7 +434,7 @@ export class RedashClient {
         logger.error(`Request config: ${JSON.stringify({
           url: axiosError.config?.url,
           method: axiosError.config?.method,
-          headers: axiosError.config?.headers,
+          
           data: axiosError.config?.data
         }, null, 2)}`);
 
