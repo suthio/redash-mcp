@@ -37,7 +37,7 @@ logger.info('Starting Redash MCP server...');
 
 // Tool: get_query
 const getQuerySchema = z.object({
-  queryId: z.number()
+  queryId: z.coerce.number()
 });
 
 async function getQuery(params: z.infer<typeof getQuerySchema>) {
@@ -70,7 +70,7 @@ async function getQuery(params: z.infer<typeof getQuerySchema>) {
 // Tool: create_query
 const createQuerySchema = z.object({
   name: z.string(),
-  data_source_id: z.number(),
+  data_source_id: z.coerce.number(),
   query: z.string(),
   description: z.string().optional(),
   options: z.any().optional(),
@@ -121,9 +121,9 @@ async function createQuery(params: z.infer<typeof createQuerySchema>) {
 
 // Tool: update_query
 const updateQuerySchema = z.object({
-  queryId: z.number(),
+  queryId: z.coerce.number(),
   name: z.string().optional(),
-  data_source_id: z.number().optional(),
+  data_source_id: z.coerce.number().optional(),
   query: z.string().optional(),
   description: z.string().optional(),
   options: z.any().optional(),
@@ -181,7 +181,7 @@ async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
 
 // Tool: archive_query
 const archiveQuerySchema = z.object({
-  queryId: z.number()
+  queryId: z.coerce.number()
 });
 
 async function archiveQuery(params: z.infer<typeof archiveQuerySchema>) {
@@ -240,8 +240,8 @@ async function listDataSources() {
 
 // Tool: list_queries
 const listQueriesSchema = z.object({
-  page: z.number().optional().default(1),
-  pageSize: z.number().optional().default(25),
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25),
   q: z.string().optional()
 });
 
@@ -275,7 +275,7 @@ async function listQueries(params: z.infer<typeof listQueriesSchema>) {
 
 // Tool: execute_query
 const executeQuerySchema = z.object({
-  queryId: z.number(),
+  queryId: z.coerce.number(),
   parameters: z.record(z.any()).optional()
 });
 
@@ -308,7 +308,7 @@ async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
 
 // Tool: get_query_results_csv
 const getQueryResultsCsvSchema = z.object({
-  queryId: z.number(),
+  queryId: z.coerce.number(),
   refresh: z.boolean().optional().default(false)
 });
 
@@ -341,8 +341,8 @@ async function getQueryResultsCsv(params: z.infer<typeof getQueryResultsCsvSchem
 
 // Tool: list_dashboards
 const listDashboardsSchema = z.object({
-  page: z.number().optional().default(1),
-  pageSize: z.number().optional().default(25)
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25)
 });
 
 async function listDashboards(params: z.infer<typeof listDashboardsSchema>) {
@@ -374,7 +374,7 @@ async function listDashboards(params: z.infer<typeof listDashboardsSchema>) {
 
 // Tool: get_dashboard
 const getDashboardSchema = z.object({
-  dashboardId: z.number()
+  dashboardId: z.coerce.number()
 });
 
 async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
@@ -406,7 +406,7 @@ async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
 
 // Tool: get_visualization
 const getVisualizationSchema = z.object({
-  visualizationId: z.number()
+  visualizationId: z.coerce.number()
 });
 
 async function getVisualization(params: z.infer<typeof getVisualizationSchema>) {
@@ -439,7 +439,7 @@ async function getVisualization(params: z.infer<typeof getVisualizationSchema>) 
 // Tool: execute_adhoc_query
 const executeAdhocQuerySchema = z.object({
   query: z.string(),
-  dataSourceId: z.number()
+  dataSourceId: z.coerce.number()
 });
 
 async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>) {
@@ -471,7 +471,7 @@ async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>
 
 // Tool: create_visualization
 const createVisualizationSchema = z.object({
-  query_id: z.number(),
+  query_id: z.coerce.number(),
   type: z.string(),
   name: z.string(),
   description: z.string().optional(),
@@ -514,7 +514,7 @@ async function createVisualization(params: z.infer<typeof createVisualizationSch
 
 // Tool: update_visualization
 const updateVisualizationSchema = z.object({
-  visualizationId: z.number(),
+  visualizationId: z.coerce.number(),
   type: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),
@@ -550,7 +550,7 @@ async function updateVisualization(params: z.infer<typeof updateVisualizationSch
 
 // Tool: delete_visualization
 const deleteVisualizationSchema = z.object({
-  visualizationId: z.number()
+  visualizationId: z.coerce.number()
 });
 
 async function deleteVisualization(params: z.infer<typeof deleteVisualizationSchema>) {
@@ -582,7 +582,7 @@ async function deleteVisualization(params: z.infer<typeof deleteVisualizationSch
 
 // Tool: get_schema
 const getSchemaSchema = z.object({
-  dataSourceId: z.number(),
+  dataSourceId: z.coerce.number(),
 });
 
 async function getSchema(params: z.infer<typeof getSchemaSchema>) {
@@ -645,7 +645,7 @@ async function createDashboard(params: z.infer<typeof createDashboardSchema>) {
 
 // Tool: update_dashboard
 const updateDashboardSchema = z.object({
-  dashboardId: z.number(),
+  dashboardId: z.coerce.number(),
   name: z.string().optional(),
   tags: z.array(z.string()).optional(),
   is_archived: z.boolean().optional(),
@@ -678,7 +678,7 @@ async function updateDashboard(params: z.infer<typeof updateDashboardSchema>) {
 
 // Tool: archive_dashboard
 const archiveDashboardSchema = z.object({
-  dashboardId: z.number()
+  dashboardId: z.coerce.number()
 });
 
 async function archiveDashboard(params: z.infer<typeof archiveDashboardSchema>) {
@@ -698,7 +698,7 @@ async function archiveDashboard(params: z.infer<typeof archiveDashboardSchema>) 
 
 // Tool: fork_dashboard
 const forkDashboardSchema = z.object({
-  dashboardId: z.number()
+  dashboardId: z.coerce.number()
 });
 
 async function forkDashboard(params: z.infer<typeof forkDashboardSchema>) {
@@ -738,7 +738,7 @@ async function getPublicDashboard(params: z.infer<typeof getPublicDashboardSchem
 
 // Tool: share_dashboard
 const shareDashboardSchema = z.object({
-  dashboardId: z.number()
+  dashboardId: z.coerce.number()
 });
 
 async function shareDashboard(params: z.infer<typeof shareDashboardSchema>) {
@@ -758,7 +758,7 @@ async function shareDashboard(params: z.infer<typeof shareDashboardSchema>) {
 
 // Tool: unshare_dashboard
 const unshareDashboardSchema = z.object({
-  dashboardId: z.number()
+  dashboardId: z.coerce.number()
 });
 
 async function unshareDashboard(params: z.infer<typeof unshareDashboardSchema>) {
@@ -778,8 +778,8 @@ async function unshareDashboard(params: z.infer<typeof unshareDashboardSchema>) 
 
 // Tool: get_my_dashboards
 const getMyDashboardsSchema = z.object({
-  page: z.number().optional().default(1),
-  pageSize: z.number().optional().default(25)
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25)
 });
 
 async function getMyDashboards(params: z.infer<typeof getMyDashboardsSchema>) {
@@ -799,8 +799,8 @@ async function getMyDashboards(params: z.infer<typeof getMyDashboardsSchema>) {
 
 // Tool: get_favorite_dashboards
 const getFavoriteDashboardsSchema = z.object({
-  page: z.number().optional().default(1),
-  pageSize: z.number().optional().default(25)
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25)
 });
 
 async function getFavoriteDashboards(params: z.infer<typeof getFavoriteDashboardsSchema>) {
@@ -820,7 +820,7 @@ async function getFavoriteDashboards(params: z.infer<typeof getFavoriteDashboard
 
 // Tool: add_dashboard_favorite
 const addDashboardFavoriteSchema = z.object({
-  dashboardId: z.number()
+  dashboardId: z.coerce.number()
 });
 
 async function addDashboardFavorite(params: z.infer<typeof addDashboardFavoriteSchema>) {
@@ -840,7 +840,7 @@ async function addDashboardFavorite(params: z.infer<typeof addDashboardFavoriteS
 
 // Tool: remove_dashboard_favorite
 const removeDashboardFavoriteSchema = z.object({
-  dashboardId: z.number()
+  dashboardId: z.coerce.number()
 });
 
 async function removeDashboardFavorite(params: z.infer<typeof removeDashboardFavoriteSchema>) {
@@ -894,7 +894,7 @@ async function listAlerts() {
 
 // Tool: get_alert
 const getAlertSchema = z.object({
-  alertId: z.number()
+  alertId: z.coerce.number()
 });
 
 async function getAlert(params: z.infer<typeof getAlertSchema>) {
@@ -915,15 +915,15 @@ async function getAlert(params: z.infer<typeof getAlertSchema>) {
 // Tool: create_alert
 const createAlertSchema = z.object({
   name: z.string(),
-  query_id: z.number(),
+  query_id: z.coerce.number(),
   options: z.object({
     column: z.string(),
     op: z.string(),
-    value: z.union([z.number(), z.string()]),
+    value: z.union([z.coerce.number(), z.string()]),
     custom_subject: z.string().optional(),
     custom_body: z.string().optional()
   }),
-  rearm: z.number().nullable().optional()
+  rearm: z.coerce.number().nullable().optional()
 });
 
 async function createAlert(params: z.infer<typeof createAlertSchema>) {
@@ -949,17 +949,17 @@ async function createAlert(params: z.infer<typeof createAlertSchema>) {
 
 // Tool: update_alert
 const updateAlertSchema = z.object({
-  alertId: z.number(),
+  alertId: z.coerce.number(),
   name: z.string().optional(),
-  query_id: z.number().optional(),
+  query_id: z.coerce.number().optional(),
   options: z.object({
     column: z.string().optional(),
     op: z.string().optional(),
-    value: z.union([z.number(), z.string()]).optional(),
+    value: z.union([z.coerce.number(), z.string()]).optional(),
     custom_subject: z.string().optional(),
     custom_body: z.string().optional()
   }).optional(),
-  rearm: z.number().nullable().optional()
+  rearm: z.coerce.number().nullable().optional()
 });
 
 async function updateAlert(params: z.infer<typeof updateAlertSchema>) {
@@ -986,7 +986,7 @@ async function updateAlert(params: z.infer<typeof updateAlertSchema>) {
 
 // Tool: delete_alert
 const deleteAlertSchema = z.object({
-  alertId: z.number()
+  alertId: z.coerce.number()
 });
 
 async function deleteAlert(params: z.infer<typeof deleteAlertSchema>) {
@@ -1006,7 +1006,7 @@ async function deleteAlert(params: z.infer<typeof deleteAlertSchema>) {
 
 // Tool: mute_alert
 const muteAlertSchema = z.object({
-  alertId: z.number()
+  alertId: z.coerce.number()
 });
 
 async function muteAlert(params: z.infer<typeof muteAlertSchema>) {
@@ -1026,7 +1026,7 @@ async function muteAlert(params: z.infer<typeof muteAlertSchema>) {
 
 // Tool: get_alert_subscriptions
 const getAlertSubscriptionsSchema = z.object({
-  alertId: z.number()
+  alertId: z.coerce.number()
 });
 
 async function getAlertSubscriptions(params: z.infer<typeof getAlertSubscriptionsSchema>) {
@@ -1046,8 +1046,8 @@ async function getAlertSubscriptions(params: z.infer<typeof getAlertSubscription
 
 // Tool: add_alert_subscription
 const addAlertSubscriptionSchema = z.object({
-  alertId: z.number(),
-  destination_id: z.number().optional()
+  alertId: z.coerce.number(),
+  destination_id: z.coerce.number().optional()
 });
 
 async function addAlertSubscription(params: z.infer<typeof addAlertSubscriptionSchema>) {
@@ -1070,8 +1070,8 @@ async function addAlertSubscription(params: z.infer<typeof addAlertSubscriptionS
 
 // Tool: remove_alert_subscription
 const removeAlertSubscriptionSchema = z.object({
-  alertId: z.number(),
-  subscriptionId: z.number()
+  alertId: z.coerce.number(),
+  subscriptionId: z.coerce.number()
 });
 
 async function removeAlertSubscription(params: z.infer<typeof removeAlertSubscriptionSchema>) {
@@ -1093,7 +1093,7 @@ async function removeAlertSubscription(params: z.infer<typeof removeAlertSubscri
 
 // Tool: fork_query
 const forkQuerySchema = z.object({
-  queryId: z.number()
+  queryId: z.coerce.number()
 });
 
 async function forkQuery(params: z.infer<typeof forkQuerySchema>) {
@@ -1113,8 +1113,8 @@ async function forkQuery(params: z.infer<typeof forkQuerySchema>) {
 
 // Tool: get_my_queries
 const getMyQueriesSchema = z.object({
-  page: z.number().optional().default(1),
-  pageSize: z.number().optional().default(25)
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25)
 });
 
 async function getMyQueries(params: z.infer<typeof getMyQueriesSchema>) {
@@ -1134,8 +1134,8 @@ async function getMyQueries(params: z.infer<typeof getMyQueriesSchema>) {
 
 // Tool: get_recent_queries
 const getRecentQueriesSchema = z.object({
-  page: z.number().optional().default(1),
-  pageSize: z.number().optional().default(25)
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25)
 });
 
 async function getRecentQueries(params: z.infer<typeof getRecentQueriesSchema>) {
@@ -1171,8 +1171,8 @@ async function getQueryTags() {
 
 // Tool: get_favorite_queries
 const getFavoriteQueriesSchema = z.object({
-  page: z.number().optional().default(1),
-  pageSize: z.number().optional().default(25)
+  page: z.coerce.number().optional().default(1),
+  pageSize: z.coerce.number().optional().default(25)
 });
 
 async function getFavoriteQueries(params: z.infer<typeof getFavoriteQueriesSchema>) {
@@ -1192,7 +1192,7 @@ async function getFavoriteQueries(params: z.infer<typeof getFavoriteQueriesSchem
 
 // Tool: add_query_favorite
 const addQueryFavoriteSchema = z.object({
-  queryId: z.number()
+  queryId: z.coerce.number()
 });
 
 async function addQueryFavorite(params: z.infer<typeof addQueryFavoriteSchema>) {
@@ -1212,7 +1212,7 @@ async function addQueryFavorite(params: z.infer<typeof addQueryFavoriteSchema>) 
 
 // Tool: remove_query_favorite
 const removeQueryFavoriteSchema = z.object({
-  queryId: z.number()
+  queryId: z.coerce.number()
 });
 
 async function removeQueryFavorite(params: z.infer<typeof removeQueryFavoriteSchema>) {
@@ -1250,7 +1250,7 @@ async function listWidgets() {
 
 // Tool: get_widget
 const getWidgetSchema = z.object({
-  widgetId: z.number()
+  widgetId: z.coerce.number()
 });
 
 async function getWidget(params: z.infer<typeof getWidgetSchema>) {
@@ -1270,10 +1270,10 @@ async function getWidget(params: z.infer<typeof getWidgetSchema>) {
 
 // Tool: create_widget
 const createWidgetSchema = z.object({
-  dashboard_id: z.number(),
-  visualization_id: z.number().optional(),
+  dashboard_id: z.coerce.number(),
+  visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
-  width: z.number(),
+  width: z.coerce.number(),
   options: z.any().optional()
 });
 
@@ -1301,10 +1301,10 @@ async function createWidget(params: z.infer<typeof createWidgetSchema>) {
 
 // Tool: update_widget
 const updateWidgetSchema = z.object({
-  widgetId: z.number(),
-  visualization_id: z.number().optional(),
+  widgetId: z.coerce.number(),
+  visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
-  width: z.number().optional(),
+  width: z.coerce.number().optional(),
   options: z.any().optional()
 });
 
@@ -1332,7 +1332,7 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
 
 // Tool: delete_widget
 const deleteWidgetSchema = z.object({
-  widgetId: z.number()
+  widgetId: z.coerce.number()
 });
 
 async function deleteWidget(params: z.infer<typeof deleteWidgetSchema>) {
@@ -1370,7 +1370,7 @@ async function listQuerySnippets() {
 
 // Tool: get_query_snippet
 const getQuerySnippetSchema = z.object({
-  snippetId: z.number()
+  snippetId: z.coerce.number()
 });
 
 async function getQuerySnippet(params: z.infer<typeof getQuerySnippetSchema>) {
@@ -1417,7 +1417,7 @@ async function createQuerySnippet(params: z.infer<typeof createQuerySnippetSchem
 
 // Tool: update_query_snippet
 const updateQuerySnippetSchema = z.object({
-  snippetId: z.number(),
+  snippetId: z.coerce.number(),
   trigger: z.string().optional(),
   description: z.string().optional(),
   snippet: z.string().optional()
@@ -1446,7 +1446,7 @@ async function updateQuerySnippet(params: z.infer<typeof updateQuerySnippetSchem
 
 // Tool: delete_query_snippet
 const deleteQuerySnippetSchema = z.object({
-  snippetId: z.number()
+  snippetId: z.coerce.number()
 });
 
 async function deleteQuerySnippet(params: z.infer<typeof deleteQuerySnippetSchema>) {
