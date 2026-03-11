@@ -27,6 +27,21 @@ jobs:
         run: npm ci
         
       - name: Run tagpr
+        id: tagpr
         uses: Songmu/tagpr@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        if: steps.tagpr.outputs.tag != ''
+        run: npm run build
+
+      - name: Test
+        if: steps.tagpr.outputs.tag != ''
+        run: npm test
+
+      - name: Publish to npm
+        if: steps.tagpr.outputs.tag != ''
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
