@@ -395,7 +395,7 @@ export class RedashClient {
         logger.error(`Request config: ${JSON.stringify({
           url: axiosError.config?.url,
           method: axiosError.config?.method,
-          
+
           data: axiosError.config?.data
         }, null, 2)}`);
 
@@ -444,7 +444,7 @@ export class RedashClient {
         logger.error(`Request config: ${JSON.stringify({
           url: axiosError.config?.url,
           method: axiosError.config?.method,
-          
+
           data: axiosError.config?.data
         }, null, 2)}`);
 
@@ -606,6 +606,19 @@ export class RedashClient {
     } catch (error) {
       console.error(`Error fetching dashboard ${dashboardId}:`, error);
       throw new Error(`Failed to fetch dashboard ${dashboardId} from Redash`);
+    }
+  }
+
+  // Get a specific dashboard by slug
+  async getDashboardBySlug(slug: string): Promise<RedashDashboard> {
+    try {
+      const response = await this.client.get(`/api/dashboards/${slug}`, {
+        params: { legacy: null }
+      });
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching dashboard by slug '${slug}': ${error}`);
+      throw new Error(`Failed to fetch dashboard by slug '${slug}' from Redash`);
     }
   }
 

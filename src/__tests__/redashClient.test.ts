@@ -474,6 +474,34 @@ describe('RedashClient', () => {
     });
   });
 
+  describe('getDashboardBySlug', () => {
+    it('should fetch a dashboard by slug with legacy parameter', async () => {
+      const mockDashboard = {
+        id: 1,
+        name: 'Test Dashboard',
+        slug: 'test-dashboard',
+        widgets: [],
+      };
+
+      mockAxiosInstance.get.mockResolvedValue({ data: mockDashboard });
+
+      const result = await client.getDashboardBySlug('test-dashboard');
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/test-dashboard', {
+        params: { legacy: null }
+      });
+      expect(result).toEqual(mockDashboard);
+    });
+
+    it('should throw error on failure', async () => {
+      mockAxiosInstance.get.mockRejectedValue(new Error('Not found'));
+
+      await expect(client.getDashboardBySlug('non-existent-slug')).rejects.toThrow(
+        "Failed to fetch dashboard by slug 'non-existent-slug' from Redash"
+      );
+    });
+  });
+
   describe('getVisualization', () => {
     it('should fetch a specific visualization', async () => {
       const mockVisualization = {

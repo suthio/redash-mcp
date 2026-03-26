@@ -404,6 +404,38 @@ async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
   }
 }
 
+// Tool: get_dashboard_by_slug
+const getDashboardBySlugSchema = z.object({
+  slug: z.string()
+});
+
+async function getDashboardBySlug(params: z.infer<typeof getDashboardBySlugSchema>) {
+  try {
+    const { slug } = params;
+    const dashboard = await redashClient.getDashboardBySlug(slug);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(dashboard, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error getting dashboard by slug '${params.slug}': ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error getting dashboard by slug '${params.slug}': ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
 // Tool: get_visualization
 const getVisualizationSchema = z.object({
   visualizationId: z.coerce.number()
@@ -1700,6 +1732,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_dashboard_by_slug",
+        description: "Get details of a specific dashboard by its slug",
+        inputSchema: {
+          type: "object",
+          properties: {
+            slug: { type: "string", description: "Slug of the dashboard to get" }
+          },
+          required: ["slug"]
+        }
+      },
+      {
         name: "get_visualization",
         description: "Get details of a specific visualization",
         inputSchema: {
@@ -2325,6 +2368,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_dashboard":
         logger.debug(`Handling get_dashboard`);
         return await getDashboard(getDashboardSchema.parse(args));
+
+      case "get_dashboard_by_slug":
+        logger.debug(`Handling get_dashboard_by_slug`);
+        return await getDashboardBySlug(getDashboardBySlugSchema.parse(args));
 
       case "get_visualization":
         logger.debug(`Handling get_visualization`);
