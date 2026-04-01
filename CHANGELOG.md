@@ -2,6 +2,7 @@
 
 ## [v0.0.13](https://github.com/suthio/redash-mcp/compare/v0.0.12...v0.0.13) - 2026-03-26
 - Add get_dashboard_by_slug tool for slug-based dashboard lookup by @ryo-imai-bit in https://github.com/suthio/redash-mcp/pull/41
+- Add Dependabot for automated npm and GitHub Actions updates by @suthio in https://github.com/suthio/redash-mcp/pull/37
 
 ## [v0.0.12](https://github.com/suthio/redash-mcp/compare/v0.0.11...v0.0.12) - 2026-03-19
 - Add npm publish to tagpr workflow by @suthio in https://github.com/suthio/redash-mcp/pull/38
