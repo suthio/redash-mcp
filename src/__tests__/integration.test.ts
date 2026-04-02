@@ -139,7 +139,8 @@ describe('MCP Server Integration', () => {
 
       const executeQuerySchema = z.object({
         queryId: z.number(),
-        parameters: z.record(z.any()).optional()
+        parameters: z.record(z.any()).optional(),
+        maxAge: z.number().optional()
       });
 
       const validData = {
@@ -154,6 +155,28 @@ describe('MCP Server Integration', () => {
       };
 
       expect(() => executeQuerySchema.parse(validDataWithoutParams)).not.toThrow();
+    });
+
+    it('should validate parameterized query execution parameters', () => {
+      const { z } = require('zod');
+
+      const executeParameterizedQuerySchema = z.object({
+        queryId: z.number(),
+        parameters: z.record(z.any()).optional(),
+        useSavedDefaults: z.boolean().optional(),
+        maxAge: z.number().optional(),
+      });
+
+      expect(() => executeParameterizedQuerySchema.parse({
+        queryId: 123,
+        parameters: { category: 'example-value', flag: true },
+        useSavedDefaults: true,
+        maxAge: 0,
+      })).not.toThrow();
+
+      expect(() => executeParameterizedQuerySchema.parse({
+        parameters: { category: 'example-value' },
+      })).toThrow();
     });
 
     it('should validate visualization creation parameters', () => {

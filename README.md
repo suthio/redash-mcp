@@ -11,6 +11,7 @@ Model Context Protocol (MCP) server for integrating Redash with AI assistants li
 - Connect to Redash instances via the Redash API
 - List available queries and dashboards as resources
 - Execute queries and retrieve results
+- Execute saved parameterized queries with typed values and saved defaults
 - Create and manage queries (create, update, archive)
 - Manage query parameters, dashboard parameters, and widget parameter mappings
 - Inspect and update dashboard widget layouts and grid positions
@@ -125,7 +126,8 @@ Add the following configuration (edit paths as needed):
 - `list-data-sources`: List all available data sources
 
 ### Query Execution
-- `execute-query`: Execute a query and return results
+- `execute-query`: Execute a query and return results, with optional `maxAge`
+- `execute-parameterized-query`: Execute a saved parameterized query with type-aware value coercion, saved defaults, and optional `maxAge`
 - `execute-adhoc-query`: Execute an ad-hoc query without saving it to Redash
 - `get-query-results-csv`: Get query results in CSV format (supports optional refresh for latest data)
 

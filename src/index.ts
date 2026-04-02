@@ -13,6 +13,7 @@ import * as dotenv from 'dotenv';
 import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { buildChartVisualizationOptionsPatch, chartVisualizationUpdateSchema, mergeDeep } from "./chartVisualization.js";
 import { mergeNamedEntries, queryParameterPatchSchema, queryParameterTypeValues, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema, widgetParameterMappingTypeValues } from "./parameterManagement.js";
+import { buildParameterizedExecutionParameters, ParameterizedExecutionError } from "./parameterizedExecution.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
 import { logger, LogLevel } from "./logger.js";
 
@@ -438,13 +439,14 @@ async function listQueries(params: z.infer<typeof listQueriesSchema>) {
 // Tool: execute_query
 const executeQuerySchema = z.object({
   queryId: z.coerce.number(),
-  parameters: z.record(z.any()).optional()
+  parameters: z.record(z.any()).optional(),
+  maxAge: z.coerce.number().optional()
 });
 
 async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
   try {
-    const { queryId, parameters } = params;
-    const result = await redashClient.executeQuery(queryId, parameters);
+    const { queryId, parameters, maxAge } = params;
+    const result = await redashClient.executeQuery(queryId, parameters, maxAge);
 
     return {
       content: [
@@ -462,6 +464,64 @@ async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
         {
           type: "text",
           text: `Error executing query ${params.queryId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: execute_parameterized_query
+const executeParameterizedQuerySchema = z.object({
+  queryId: z.coerce.number(),
+  parameters: z.record(z.any()).optional().default({}),
+  useSavedDefaults: z.boolean().optional().default(true),
+  maxAge: z.coerce.number().optional()
+});
+
+async function executeParameterizedQuery(params: z.infer<typeof executeParameterizedQuerySchema>) {
+  let effectiveParameters: Record<string, unknown> | undefined;
+
+  try {
+    const query = await redashClient.getQuery(params.queryId);
+    const parameterDefinitions = Array.isArray(query.options?.parameters) ? query.options.parameters : [];
+    effectiveParameters = buildParameterizedExecutionParameters(parameterDefinitions, params.parameters, {
+      useSavedDefaults: params.useSavedDefaults
+    });
+    const result = await redashClient.executeQuery(params.queryId, effectiveParameters, params.maxAge);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            queryId: query.id,
+            name: query.name,
+            effectiveParameters,
+            result
+          }, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const details = {
+      queryId: params.queryId,
+      effectiveParameters,
+      error: errorMessage
+    };
+
+    if (error instanceof ParameterizedExecutionError) {
+      logger.error(`Error normalizing parameterized query ${params.queryId}: ${error}`);
+    } else {
+      logger.error(`Error executing parameterized query ${params.queryId}: ${error}`);
+    }
+
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(details, null, 2)
         }
       ]
     };
@@ -2231,7 +2291,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "object",
               description: "Parameters to pass to the query (if any)",
               additionalProperties: true
-            }
+            },
+            maxAge: { type: "number", description: "Cache age in seconds. Use 0 to force a fresh execution." }
+          },
+          required: ["queryId"]
+        }
+      },
+      {
+        name: "execute_parameterized_query",
+        description: "Execute a saved parameterized query using its saved parameter definitions and defaults",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queryId: { type: "number", description: "ID of the query to execute" },
+            parameters: {
+              type: "object",
+              description: "Explicit parameter values to coerce using the saved Redash parameter definitions",
+              additionalProperties: true
+            },
+            useSavedDefaults: { type: "boolean", description: "Apply saved default parameter values when a parameter is omitted" },
+            maxAge: { type: "number", description: "Cache age in seconds. Use 0 to force a fresh execution." }
           },
           required: ["queryId"]
         }
@@ -3045,6 +3124,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "execute_query":
         logger.debug(`Handling execute_query`);
         return await executeQuery(executeQuerySchema.parse(args));
+
+      case "execute_parameterized_query":
+        logger.debug(`Handling execute_parameterized_query`);
+        return await executeParameterizedQuery(executeParameterizedQuerySchema.parse(args));
 
       case "get_query_results_csv":
         logger.debug(`Handling get_query_results_csv`);

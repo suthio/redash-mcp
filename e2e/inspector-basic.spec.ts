@@ -150,6 +150,7 @@ test.describe('MCP Inspector - Basic Tests', () => {
       'archive_query',
       'list_data_sources',
       'execute_query',
+      'execute_parameterized_query',
       'execute_adhoc_query',
       'get_query_results_csv',
       'list_dashboards',
