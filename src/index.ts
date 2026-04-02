@@ -1630,11 +1630,12 @@ const updateWidgetSchema = z.object({
 async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
   try {
     const { widgetId, ...updateData } = params;
+    const currentWidget = await redashClient.getWidget(widgetId);
     const widgetData: UpdateWidgetRequest = {};
     if (updateData.visualization_id !== undefined) widgetData.visualization_id = updateData.visualization_id;
-    if (updateData.text !== undefined) widgetData.text = updateData.text;
+    widgetData.text = updateData.text !== undefined ? updateData.text : (currentWidget.text ?? "");
     if (updateData.width !== undefined) widgetData.width = updateData.width;
-    if (updateData.options !== undefined) widgetData.options = updateData.options;
+    widgetData.options = updateData.options !== undefined ? updateData.options : (currentWidget.options ?? {});
 
     const result = await redashClient.updateWidget(widgetId, widgetData);
     return {
@@ -1710,6 +1711,7 @@ async function updateWidgetParameterMappings(params: z.infer<typeof updateWidget
     });
 
     const updateData: UpdateWidgetRequest = {
+      text: widget.text ?? "",
       options: {
         ...widgetOptions,
         parameterMappings: toNamedRecord(updatedMappings)
