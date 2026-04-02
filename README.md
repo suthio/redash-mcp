@@ -14,6 +14,7 @@ Model Context Protocol (MCP) server for integrating Redash with AI assistants li
 - Create and manage queries (create, update, archive)
 - List data sources for query creation
 - Get dashboard details and visualizations
+- Update chart visualization options with Redash chart-specific settings
 
 ## Prerequisites
 
@@ -132,6 +133,7 @@ Add the following configuration (edit paths as needed):
 ### Visualization Management
 - `create-visualization`: Create a new visualization for a query
 - `update-visualization`: Update an existing visualization
+- `update-chart-visualization`: Patch chart-specific options like `globalSeriesType`, `columnMapping`, `seriesOptions`, `legend`, and axis settings
 - `delete-visualization`: Delete a visualization
 
 ## Development

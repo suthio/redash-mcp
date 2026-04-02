@@ -184,6 +184,25 @@ describe('MCP Server Integration', () => {
 
       expect(() => createVisualizationSchema.parse(invalidData)).toThrow();
     });
+
+    it('should validate chart visualization update parameters', () => {
+      const { chartVisualizationUpdateSchema } = require('../chartVisualization.js');
+
+      const validData = {
+        visualizationId: 184,
+        globalSeriesType: 'column',
+        columnMapping: { x: 'send_hour', y: 'clicks' },
+        chartOptions: { legend: { enabled: true } },
+      };
+
+      expect(() => chartVisualizationUpdateSchema.parse(validData)).not.toThrow();
+
+      const invalidData = {
+        globalSeriesType: 'column',
+      };
+
+      expect(() => chartVisualizationUpdateSchema.parse(invalidData)).toThrow();
+    });
   });
 
   describe('Resource URI parsing', () => {

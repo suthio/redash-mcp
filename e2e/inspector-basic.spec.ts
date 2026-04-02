@@ -155,6 +155,7 @@ test.describe('MCP Inspector - Basic Tests', () => {
       'get_visualization',
       'create_visualization',
       'update_visualization',
+      'update_chart_visualization',
       'delete_visualization',
       'get_schema',
     ];

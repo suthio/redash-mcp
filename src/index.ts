@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import * as dotenv from 'dotenv';
 import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
+import { buildChartVisualizationOptionsPatch, chartVisualizationUpdateSchema, mergeDeep } from "./chartVisualization.js";
 import { logger, LogLevel } from "./logger.js";
 
 // Load environment variables
@@ -574,6 +575,48 @@ async function updateVisualization(params: z.infer<typeof updateVisualizationSch
         {
           type: "text",
           text: `Error updating visualization ${params.visualizationId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: update_chart_visualization
+async function updateChartVisualization(params: z.infer<typeof chartVisualizationUpdateSchema>) {
+  try {
+    const { visualizationId, replaceOptions, chartOptions, ...metadata } = params;
+    const currentVisualization = replaceOptions ? null : await redashClient.getVisualization(visualizationId);
+    const optionsPatch = buildChartVisualizationOptionsPatch({
+      visualizationId,
+      replaceOptions,
+      chartOptions,
+      ...metadata,
+    });
+    const options = replaceOptions
+      ? optionsPatch
+      : mergeDeep((currentVisualization?.options ?? {}) as Record<string, unknown>, optionsPatch);
+
+    const result = await redashClient.updateVisualization(visualizationId, {
+      ...metadata,
+      options,
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    console.error(`Error updating chart visualization ${params.visualizationId}:`, error);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error updating chart visualization ${params.visualizationId}: ${error instanceof Error ? error.message : String(error)}`
         }
       ]
     };
@@ -1796,6 +1839,60 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "update_chart_visualization",
+        description: "Update chart-specific visualization options and merge them with the current Redash chart config by default",
+        inputSchema: {
+          type: "object",
+          properties: {
+            visualizationId: { type: "number", description: "ID of the visualization to update" },
+            type: { type: "string", description: "Type of visualization" },
+            name: { type: "string", description: "Name of the visualization" },
+            description: { type: "string", description: "Description of the visualization" },
+            replaceOptions: { type: "boolean", description: "Replace the entire options payload instead of merging with the current config" },
+            globalSeriesType: { type: "string", enum: ["line", "column", "area", "pie", "scatter", "bubble", "heatmap", "box", "custom"], description: "Chart type" },
+            sortX: { type: "boolean", description: "Sort the X axis" },
+            swappedAxes: { type: "boolean", description: "Swap the chart axes" },
+            sortY: { type: "boolean", description: "Sort heatmap values" },
+            reverseY: { type: "boolean", description: "Reverse heatmap order" },
+            showpoints: { type: "boolean", description: "Show all points for box charts" },
+            alignYAxesAtZero: { type: "boolean", description: "Align left and right Y axes at zero" },
+            legend: {
+              type: "object",
+              description: "Legend settings",
+              properties: {
+                enabled: { type: "boolean" },
+                placement: { type: "string", enum: ["auto", "below"] },
+                traceorder: { type: "string", enum: ["normal", "reversed"] }
+              }
+            },
+            xAxis: { type: "object", description: "X axis settings" },
+            yAxis: { type: "array", description: "Y axis settings" },
+            error_y: { type: "object", description: "Error bar settings" },
+            series: { type: "object", description: "Series-wide chart settings" },
+            seriesOptions: { type: "object", description: "Per-series settings keyed by series name" },
+            valuesOptions: { type: "object", description: "Per-value settings" },
+            columnMapping: { type: "object", description: "Column mappings such as x, y, and series" },
+            direction: { type: "object", description: "Pie chart direction settings" },
+            sizemode: { type: "string", enum: ["area", "diameter"], description: "Bubble size mode" },
+            coefficient: { type: "number", description: "Bubble size coefficient" },
+            piesort: { type: "boolean", description: "Sort pie slices" },
+            color_scheme: { type: "string", description: "Color palette name" },
+            lineShape: { type: "string", enum: ["linear", "spline", "hv", "vh"], description: "Line interpolation" },
+            showDataLabels: { type: "boolean", description: "Toggle data labels" },
+            numberFormat: { type: "string", description: "Number format" },
+            percentFormat: { type: "string", description: "Percent format" },
+            dateTimeFormat: { type: "string", description: "Date/time format" },
+            textFormat: { type: "string", description: "Data label template" },
+            enableLink: { type: "boolean", description: "Enable click-through links" },
+            linkOpenNewTab: { type: "boolean", description: "Open click-through links in a new tab" },
+            linkFormat: { type: "string", description: "Click-through URL template" },
+            missingValuesAsZero: { type: "boolean", description: "Convert missing values to zero" },
+            chartOptions: { type: "object", description: "Raw Redash chart options to merge into the payload" }
+          },
+          required: ["visualizationId"]
+        }
+      },
+      {
         name: "delete_visualization",
         description: "Delete a visualization",
         inputSchema: {
@@ -2386,6 +2483,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "update_visualization":
         return await updateVisualization(updateVisualizationSchema.parse(args));
+
+      case "update_chart_visualization":
+        return await updateChartVisualization(chartVisualizationUpdateSchema.parse(args));
 
       case "delete_visualization":
         return await deleteVisualization(deleteVisualizationSchema.parse(args));
