@@ -12,6 +12,7 @@ Model Context Protocol (MCP) server for integrating Redash with AI assistants li
 - List available queries and dashboards as resources
 - Execute queries and retrieve results
 - Create and manage queries (create, update, archive)
+- Manage query parameters, dashboard parameters, and widget parameter mappings
 - List data sources for query creation
 - Get dashboard details and visualizations
 - Update chart visualization options with Redash chart-specific settings
@@ -117,6 +118,8 @@ Add the following configuration (edit paths as needed):
 - `get-query`: Get details of a specific query 
 - `create-query`: Create a new query in Redash
 - `update-query`: Update an existing query in Redash
+- `get-query-parameters`: Inspect saved query parameter definitions
+- `update-query-parameters`: Update saved query parameter definitions
 - `archive-query`: Archive (soft-delete) a query
 - `list-data-sources`: List all available data sources
 
@@ -129,6 +132,10 @@ Add the following configuration (edit paths as needed):
 - `list-dashboards`: List all available dashboards
 - `get-dashboard`: Get dashboard details and visualizations 
 - `get-visualization`: Get details of a specific visualization
+- `get-dashboard-parameters`: Inspect dashboard parameter values and widget mappings
+- `update-dashboard-parameters`: Update dashboard parameter values and order
+- `get-widget-parameter-mappings`: Inspect a widget's parameter mappings
+- `update-widget-parameter-mappings`: Update a widget's parameter mappings
 
 ### Visualization Management
 - `create-visualization`: Create a new visualization for a query

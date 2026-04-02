@@ -12,6 +12,7 @@ import { z } from "zod";
 import * as dotenv from 'dotenv';
 import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { buildChartVisualizationOptionsPatch, chartVisualizationUpdateSchema, mergeDeep } from "./chartVisualization.js";
+import { mergeNamedEntries, queryParameterPatchSchema, queryParameterTypeValues, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema, widgetParameterMappingTypeValues } from "./parameterManagement.js";
 import { logger, LogLevel } from "./logger.js";
 
 // Load environment variables
@@ -33,6 +34,55 @@ const server = new Server(
 
 // Set up server logging
 logger.info('Starting Redash MCP server...');
+
+const stringArrayJsonSchema = { type: "array", items: { type: "string" } };
+
+const queryParameterJsonSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string", description: "Parameter name" },
+    title: { type: "string", description: "Display title" },
+    type: { type: "string", enum: [...queryParameterTypeValues], description: "Parameter type" },
+    value: { description: "Default value" },
+    global: { type: "boolean", description: "Legacy global flag" },
+    regex: { type: "string", description: "Regex for text-pattern parameters" },
+    enumOptions: {
+      oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
+      description: "Dropdown options"
+    },
+    queryId: { type: "number", description: "Query id for query-based dropdowns" },
+    multiValuesOptions: {
+      oneOf: [
+        {
+          type: "object",
+          description: "Multi-value formatting options",
+          properties: {
+            prefix: { type: "string" },
+            suffix: { type: "string" },
+            separator: { type: "string" }
+          },
+          additionalProperties: true
+        },
+        { type: "null" }
+      ]
+    }
+  },
+  required: ["name"],
+  additionalProperties: true
+};
+
+const widgetParameterMappingJsonSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string", description: "Query parameter name" },
+    type: { type: "string", enum: [...widgetParameterMappingTypeValues], description: "Mapping type" },
+    mapTo: { type: "string", description: "Dashboard parameter to map to" },
+    value: { description: "Static value for the mapping" },
+    title: { type: "string", description: "Dashboard parameter title" }
+  },
+  required: ["name"],
+  additionalProperties: true
+};
 
 // ----- Tools Implementation -----
 
@@ -174,6 +224,94 @@ async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
         {
           type: "text",
           text: `Error updating query ${params.queryId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: get_query_parameters
+const getQueryParametersSchema = z.object({
+  queryId: z.coerce.number()
+});
+
+async function getQueryParameters(params: z.infer<typeof getQueryParametersSchema>) {
+  try {
+    const query = await redashClient.getQuery(params.queryId);
+    const queryOptions = query.options || {};
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              queryId: query.id,
+              name: query.name,
+              parameters: Array.isArray(queryOptions.parameters) ? queryOptions.parameters : []
+            },
+            null,
+            2
+          )
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error getting query parameters for ${params.queryId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error getting query parameters for ${params.queryId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: update_query_parameters
+const updateQueryParametersSchema = z.object({
+  queryId: z.coerce.number(),
+  parameters: z.array(queryParameterPatchSchema).default([]),
+  removeParameterNames: z.array(z.string()).optional(),
+  replaceParameters: z.boolean().optional()
+});
+
+async function updateQueryParameters(params: z.infer<typeof updateQueryParametersSchema>) {
+  try {
+    const query = await redashClient.getQuery(params.queryId);
+    const queryOptions = query.options || {};
+    const existingParameters = Array.isArray(queryOptions.parameters) ? queryOptions.parameters : [];
+    const updatedParameters = mergeNamedEntries(existingParameters, params.parameters, {
+      replace: params.replaceParameters,
+      removeNames: params.removeParameterNames
+    });
+
+    const updateData: UpdateQueryRequest = {
+      options: mergeDeep(queryOptions, {
+        parameters: updatedParameters
+      })
+    };
+
+    const result = await redashClient.updateQuery(params.queryId, updateData);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error updating query parameters for ${params.queryId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error updating query parameters for ${params.queryId}: ${error instanceof Error ? error.message : String(error)}`
         }
       ]
     };
@@ -747,6 +885,112 @@ async function updateDashboard(params: z.infer<typeof updateDashboardSchema>) {
     return {
       isError: true,
       content: [{ type: "text", text: `Error updating dashboard ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: get_dashboard_parameters
+const getDashboardParametersSchema = z.object({
+  dashboardId: z.coerce.number()
+});
+
+async function getDashboardParameters(params: z.infer<typeof getDashboardParametersSchema>) {
+  try {
+    const dashboard = await redashClient.getDashboard(params.dashboardId);
+    const dashboardOptions = dashboard.options || {};
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              dashboardId: dashboard.id,
+              name: dashboard.name,
+              dashboard_filters_enabled: dashboard.dashboard_filters_enabled,
+              globalParamOrder: Array.isArray(dashboardOptions.globalParamOrder) ? dashboardOptions.globalParamOrder : [],
+              parameters: Array.isArray(dashboardOptions.parameters) ? dashboardOptions.parameters : [],
+              widgets: Array.isArray(dashboard.widgets)
+                ? dashboard.widgets.map((widget) => ({
+                    widgetId: widget.id,
+                    visualization_id: widget.visualization_id,
+                    text: widget.text,
+                    parameterMappings: toNamedEntries(widget.options?.parameterMappings || {}).sort((a, b) =>
+                      a.name.localeCompare(b.name)
+                    )
+                  }))
+                : []
+            },
+            null,
+            2
+          )
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error getting dashboard parameters for ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error getting dashboard parameters for ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: update_dashboard_parameters
+const updateDashboardParametersSchema = z.object({
+  dashboardId: z.coerce.number(),
+  parameters: z.array(queryParameterPatchSchema).default([]),
+  removeParameterNames: z.array(z.string()).optional(),
+  replaceParameters: z.boolean().optional(),
+  globalParamOrder: z.array(z.string()).optional()
+});
+
+async function updateDashboardParameters(params: z.infer<typeof updateDashboardParametersSchema>) {
+  try {
+    const dashboard = await redashClient.getDashboard(params.dashboardId);
+    const dashboardOptions = dashboard.options || {};
+    const existingParameters = Array.isArray(dashboardOptions.parameters) ? dashboardOptions.parameters : [];
+    const updatedParameters = mergeNamedEntries(existingParameters, params.parameters, {
+      replace: params.replaceParameters,
+      removeNames: params.removeParameterNames
+    });
+    const finalOrder = resolveParameterOrder(dashboardOptions.globalParamOrder, updatedParameters.map((param) => param.name), {
+      replace: params.replaceParameters,
+      explicitOrder: params.globalParamOrder
+    });
+
+    const updateData: UpdateDashboardRequest = {
+      options: mergeDeep(dashboardOptions, {
+        parameters: updatedParameters,
+        globalParamOrder: finalOrder
+      })
+    };
+
+    const result = await redashClient.updateDashboard(params.dashboardId, updateData);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error updating dashboard parameters for ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error updating dashboard parameters for ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
     };
   }
 }
@@ -1405,6 +1649,97 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
   }
 }
 
+// Tool: get_widget_parameter_mappings
+const getWidgetParameterMappingsSchema = z.object({
+  widgetId: z.coerce.number()
+});
+
+async function getWidgetParameterMappings(params: z.infer<typeof getWidgetParameterMappingsSchema>) {
+  try {
+    const widget = await redashClient.getWidget(params.widgetId);
+    const mappings = toNamedEntries(widget.options?.parameterMappings || {}).sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              widgetId: widget.id,
+              dashboard_id: widget.dashboard_id,
+              visualization_id: widget.visualization_id,
+              text: widget.text,
+              parameterMappings: mappings
+            },
+            null,
+            2
+          )
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error getting widget parameter mappings for ${params.widgetId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error getting widget parameter mappings for ${params.widgetId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: update_widget_parameter_mappings
+const updateWidgetParameterMappingsSchema = z.object({
+  widgetId: z.coerce.number(),
+  parameterMappings: z.array(widgetParameterMappingPatchSchema).default([]),
+  removeParameterNames: z.array(z.string()).optional(),
+  replaceParameterMappings: z.boolean().optional()
+});
+
+async function updateWidgetParameterMappings(params: z.infer<typeof updateWidgetParameterMappingsSchema>) {
+  try {
+    const widget = await redashClient.getWidget(params.widgetId);
+    const widgetOptions = widget.options || {};
+    const existingMappings = toNamedEntries(widgetOptions.parameterMappings || {});
+    const updatedMappings = mergeNamedEntries(existingMappings, params.parameterMappings, {
+      replace: params.replaceParameterMappings,
+      removeNames: params.removeParameterNames
+    });
+
+    const updateData: UpdateWidgetRequest = {
+      options: {
+        ...widgetOptions,
+        parameterMappings: toNamedRecord(updatedMappings)
+      }
+    };
+
+    const result = await redashClient.updateWidget(params.widgetId, updateData);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error updating widget parameter mappings for ${params.widgetId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error updating widget parameter mappings for ${params.widgetId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
 // Tool: delete_widget
 const deleteWidgetSchema = z.object({
   widgetId: z.coerce.number()
@@ -1706,6 +2041,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_query_parameters",
+        description: "Get the saved parameter definitions for a query",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queryId: { type: "number", description: "ID of the query" }
+          },
+          required: ["queryId"]
+        }
+      },
+      {
+        name: "update_query_parameters",
+        description: "Update a query's saved parameter definitions",
+        inputSchema: {
+          type: "object",
+          properties: {
+            queryId: { type: "number", description: "ID of the query" },
+            parameters: { type: "array", items: queryParameterJsonSchema, description: "Parameter definitions to merge into the query" },
+            removeParameterNames: stringArrayJsonSchema,
+            replaceParameters: { type: "boolean", description: "Replace the stored parameter list instead of merging" }
+          },
+          required: ["queryId"]
+        }
+      },
+      {
         name: "archive_query",
         description: "Archive (soft-delete) a query in Redash",
         inputSchema: {
@@ -1866,7 +2226,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               }
             },
             xAxis: { type: "object", description: "X axis settings" },
-            yAxis: { type: "array", description: "Y axis settings" },
+            yAxis: { type: "array", description: "Y axis settings", items: { type: "object" } },
             error_y: { type: "object", description: "Error bar settings" },
             series: { type: "object", description: "Series-wide chart settings" },
             seriesOptions: { type: "object", description: "Per-series settings keyed by series name" },
@@ -1942,6 +2302,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             is_archived: { type: "boolean", description: "Whether the dashboard is archived" },
             is_draft: { type: "boolean", description: "Whether the dashboard is a draft" },
             dashboard_filters_enabled: { type: "boolean", description: "Whether dashboard filters are enabled" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "get_dashboard_parameters",
+        description: "Get the current dashboard parameter values and widget mappings",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "update_dashboard_parameters",
+        description: "Update dashboard parameter values and ordering",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard" },
+            parameters: { type: "array", items: queryParameterJsonSchema, description: "Dashboard parameter values to merge into the dashboard" },
+            removeParameterNames: stringArrayJsonSchema,
+            replaceParameters: { type: "boolean", description: "Replace the stored parameter list instead of merging" },
+            globalParamOrder: stringArrayJsonSchema
           },
           required: ["dashboardId"]
         }
@@ -2306,6 +2692,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_widget_parameter_mappings",
+        description: "Get the parameter mappings for a widget",
+        inputSchema: {
+          type: "object",
+          properties: {
+            widgetId: { type: "number", description: "ID of the widget" }
+          },
+          required: ["widgetId"]
+        }
+      },
+      {
+        name: "update_widget_parameter_mappings",
+        description: "Update a widget's parameter mappings",
+        inputSchema: {
+          type: "object",
+          properties: {
+            widgetId: { type: "number", description: "ID of the widget" },
+            parameterMappings: { type: "array", items: widgetParameterMappingJsonSchema, description: "Parameter mappings to merge into the widget" },
+            removeParameterNames: stringArrayJsonSchema,
+            replaceParameterMappings: { type: "boolean", description: "Replace the stored mappings instead of merging" }
+          },
+          required: ["widgetId"]
+        }
+      },
+      {
         name: "delete_widget",
         description: "Delete a widget from a dashboard",
         inputSchema: {
@@ -2442,6 +2853,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // create_query and update_query are already handled in the if-else above
 
+      case "get_query_parameters":
+        logger.debug(`Handling get_query_parameters`);
+        return await getQueryParameters(getQueryParametersSchema.parse(args));
+
+      case "update_query_parameters":
+        logger.debug(`Handling update_query_parameters`);
+        return await updateQueryParameters(updateQueryParametersSchema.parse(args));
+
       case "archive_query":
         logger.debug(`Handling archive_query`);
         return await archiveQuery(archiveQuerySchema.parse(args));
@@ -2502,6 +2921,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "update_dashboard":
         logger.debug(`Handling update_dashboard`);
         return await updateDashboard(updateDashboardSchema.parse(args));
+
+      case "get_dashboard_parameters":
+        logger.debug(`Handling get_dashboard_parameters`);
+        return await getDashboardParameters(getDashboardParametersSchema.parse(args));
+
+      case "update_dashboard_parameters":
+        logger.debug(`Handling update_dashboard_parameters`);
+        return await updateDashboardParameters(updateDashboardParametersSchema.parse(args));
 
       case "archive_dashboard":
         logger.debug(`Handling archive_dashboard`);
@@ -2625,6 +3052,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "update_widget":
         logger.debug(`Handling update_widget`);
         return await updateWidget(updateWidgetSchema.parse(args));
+
+      case "get_widget_parameter_mappings":
+        logger.debug(`Handling get_widget_parameter_mappings`);
+        return await getWidgetParameterMappings(getWidgetParameterMappingsSchema.parse(args));
+
+      case "update_widget_parameter_mappings":
+        logger.debug(`Handling update_widget_parameter_mappings`);
+        return await updateWidgetParameterMappings(updateWidgetParameterMappingsSchema.parse(args));
 
       case "delete_widget":
         logger.debug(`Handling delete_widget`);

@@ -88,6 +88,7 @@ export interface RedashDashboard {
   name: string;
   slug: string;
   tags: string[];
+  options?: any;
   is_archived: boolean;
   is_draft: boolean;
   created_at: string;
@@ -96,6 +97,7 @@ export interface RedashDashboard {
   dashboard_filters_enabled: boolean;
   widgets: Array<{
     id: number;
+    visualization_id?: number;
     visualization?: {
       id: number;
       type: string;
@@ -133,6 +135,7 @@ export interface UpdateDashboardRequest {
   is_archived?: boolean;
   is_draft?: boolean;
   dashboard_filters_enabled?: boolean;
+  options?: any;
 }
 
 // Alert interfaces
