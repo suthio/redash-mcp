@@ -13,6 +13,7 @@ import * as dotenv from 'dotenv';
 import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { buildChartVisualizationOptionsPatch, chartVisualizationUpdateSchema, mergeDeep } from "./chartVisualization.js";
 import { mergeNamedEntries, queryParameterPatchSchema, queryParameterTypeValues, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema, widgetParameterMappingTypeValues } from "./parameterManagement.js";
+import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
 import { logger, LogLevel } from "./logger.js";
 
 // Load environment variables
@@ -82,6 +83,28 @@ const widgetParameterMappingJsonSchema = {
   },
   required: ["name"],
   additionalProperties: true
+};
+
+const widgetPositionJsonSchema = {
+  type: "object",
+  properties: {
+    col: { type: "number", description: "Grid column, starting at 0" },
+    row: { type: "number", description: "Grid row, starting at 0" },
+    sizeX: { type: "number", description: "Widget width in grid columns" },
+    sizeY: { type: "number", description: "Widget height in grid rows" },
+    autoHeight: { type: "boolean", description: "Whether the widget height should auto-grow" }
+  },
+  additionalProperties: false
+};
+
+const widgetLayoutEntryJsonSchema = {
+  type: "object",
+  properties: {
+    widgetId: { type: "number", description: "ID of the widget to move or resize" },
+    position: widgetPositionJsonSchema
+  },
+  required: ["widgetId", "position"],
+  additionalProperties: false
 };
 
 // ----- Tools Implementation -----
@@ -537,6 +560,42 @@ async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
         {
           type: "text",
           text: `Error getting dashboard ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}`
+        }
+      ]
+    };
+  }
+}
+
+// Tool: get_dashboard_layout
+const getDashboardLayoutSchema = z.object({
+  dashboardId: z.coerce.number()
+});
+
+async function getDashboardLayout(params: z.infer<typeof getDashboardLayoutSchema>) {
+  try {
+    const dashboard = await redashClient.getDashboard(params.dashboardId);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            dashboardId: dashboard.id,
+            name: dashboard.name,
+            grid: dashboardGridDefaults,
+            widgets: Array.isArray(dashboard.widgets) ? dashboard.widgets.map(summarizeWidgetLayout) : []
+          }, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error getting dashboard layout ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Error getting dashboard layout ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}`
         }
       ]
     };
@@ -1593,17 +1652,19 @@ const createWidgetSchema = z.object({
   visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
   width: z.coerce.number(),
-  options: z.any().optional()
+  options: z.any().optional(),
+  position: widgetPositionSchema.optional()
 });
 
 async function createWidget(params: z.infer<typeof createWidgetSchema>) {
   try {
+    const widgetOptions = params.position ? buildWidgetLayoutOptions(params.options || {}, params.position) : (params.options || {});
     const widgetData: CreateWidgetRequest = {
       dashboard_id: params.dashboard_id,
       visualization_id: params.visualization_id,
       text: params.text,
       width: params.width,
-      options: params.options || {}
+      options: widgetOptions
     };
     const result = await redashClient.createWidget(widgetData);
     return {
@@ -1624,18 +1685,20 @@ const updateWidgetSchema = z.object({
   visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
   width: z.coerce.number().optional(),
-  options: z.any().optional()
+  options: z.any().optional(),
+  position: widgetPositionSchema.optional()
 });
 
 async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
   try {
-    const { widgetId, ...updateData } = params;
+    const { widgetId, position, ...updateData } = params;
     const currentWidget = await redashClient.getWidget(widgetId);
     const widgetData: UpdateWidgetRequest = {};
     if (updateData.visualization_id !== undefined) widgetData.visualization_id = updateData.visualization_id;
     widgetData.text = updateData.text !== undefined ? updateData.text : (currentWidget.text ?? "");
     if (updateData.width !== undefined) widgetData.width = updateData.width;
-    widgetData.options = updateData.options !== undefined ? updateData.options : (currentWidget.options ?? {});
+    const currentOptions = updateData.options !== undefined ? updateData.options : (currentWidget.options ?? {});
+    widgetData.options = position ? buildWidgetLayoutOptions(currentOptions, position) : currentOptions;
 
     const result = await redashClient.updateWidget(widgetId, widgetData);
     return {
@@ -1646,6 +1709,77 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
     return {
       isError: true,
       content: [{ type: "text", text: `Error updating widget ${params.widgetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: update_widget_layout
+const updateWidgetLayoutSchema = z.object({
+  widgetId: z.coerce.number(),
+  position: widgetPositionSchema,
+});
+
+async function updateWidgetLayout(params: z.infer<typeof updateWidgetLayoutSchema>) {
+  try {
+    const widget = await redashClient.getWidget(params.widgetId);
+    const result = await redashClient.updateWidget(params.widgetId, {
+      text: widget.text ?? "",
+      options: buildWidgetLayoutOptions(widget.options ?? {}, params.position),
+    });
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+    };
+  } catch (error) {
+    logger.error(`Error updating widget layout ${params.widgetId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error updating widget layout ${params.widgetId}: ${error instanceof Error ? error.message : String(error)}` }]
+    };
+  }
+}
+
+// Tool: update_dashboard_layout
+const updateDashboardLayoutSchema = z.object({
+  dashboardId: z.coerce.number(),
+  widgets: z.array(widgetLayoutEntrySchema).min(1)
+});
+
+async function updateDashboardLayout(params: z.infer<typeof updateDashboardLayoutSchema>) {
+  try {
+    const dashboard = await redashClient.getDashboard(params.dashboardId);
+    const dashboardWidgets = new Map((dashboard.widgets || []).map((widget) => [widget.id, widget]));
+
+    for (const layout of params.widgets) {
+      if (!dashboardWidgets.has(layout.widgetId)) {
+        throw new Error(`Widget ${layout.widgetId} does not belong to dashboard ${params.dashboardId}`);
+      }
+    }
+
+    const results = await Promise.all(params.widgets.map(async (layout) => {
+      const widget = dashboardWidgets.get(layout.widgetId)!;
+      return redashClient.updateWidget(layout.widgetId, {
+        text: widget.text ?? "",
+        options: buildWidgetLayoutOptions(widget.options ?? {}, layout.position),
+      });
+    }));
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            dashboardId: dashboard.id,
+            updatedWidgets: results.map(summarizeWidgetLayout)
+          }, null, 2)
+        }
+      ]
+    };
+  } catch (error) {
+    logger.error(`Error updating dashboard layout ${params.dashboardId}: ${error}`);
+    return {
+      isError: true,
+      content: [{ type: "text", text: `Error updating dashboard layout ${params.dashboardId}: ${error instanceof Error ? error.message : String(error)}` }]
     };
   }
 }
@@ -2132,6 +2266,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             dashboardId: { type: "number", description: "ID of the dashboard to get" }
+          },
+          required: ["dashboardId"]
+        }
+      },
+      {
+        name: "get_dashboard_layout",
+        description: "Get the current widget layout for a dashboard",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard" }
           },
           required: ["dashboardId"]
         }
@@ -2673,7 +2818,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             visualization_id: { type: "number", description: "ID of the visualization to display (optional if text widget)" },
             text: { type: "string", description: "Text content for text widgets" },
             width: { type: "number", description: "Width of the widget (1-6)" },
-            options: { type: "object", description: "Widget options" }
+            options: { type: "object", description: "Widget options" },
+            position: widgetPositionJsonSchema
           },
           required: ["dashboard_id", "width"]
         }
@@ -2688,9 +2834,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             visualization_id: { type: "number", description: "ID of the visualization to display" },
             text: { type: "string", description: "Text content for text widgets" },
             width: { type: "number", description: "Width of the widget (1-6)" },
-            options: { type: "object", description: "Widget options" }
+            options: { type: "object", description: "Widget options" },
+            position: widgetPositionJsonSchema
           },
           required: ["widgetId"]
+        }
+      },
+      {
+        name: "update_widget_layout",
+        description: "Move or resize a single widget by updating its grid position",
+        inputSchema: {
+          type: "object",
+          properties: {
+            widgetId: { type: "number", description: "ID of the widget" },
+            position: widgetPositionJsonSchema
+          },
+          required: ["widgetId", "position"]
+        }
+      },
+      {
+        name: "update_dashboard_layout",
+        description: "Move or resize multiple widgets on a dashboard in one call",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dashboardId: { type: "number", description: "ID of the dashboard" },
+            widgets: { type: "array", items: widgetLayoutEntryJsonSchema, description: "Widgets to move or resize" }
+          },
+          required: ["dashboardId", "widgets"]
         }
       },
       {
@@ -2887,6 +3058,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         logger.debug(`Handling get_dashboard`);
         return await getDashboard(getDashboardSchema.parse(args));
 
+      case "get_dashboard_layout":
+        logger.debug(`Handling get_dashboard_layout`);
+        return await getDashboardLayout(getDashboardLayoutSchema.parse(args));
+
       case "get_dashboard_by_slug":
         logger.debug(`Handling get_dashboard_by_slug`);
         return await getDashboardBySlug(getDashboardBySlugSchema.parse(args));
@@ -3054,6 +3229,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "update_widget":
         logger.debug(`Handling update_widget`);
         return await updateWidget(updateWidgetSchema.parse(args));
+
+      case "update_widget_layout":
+        logger.debug(`Handling update_widget_layout`);
+        return await updateWidgetLayout(updateWidgetLayoutSchema.parse(args));
+
+      case "update_dashboard_layout":
+        logger.debug(`Handling update_dashboard_layout`);
+        return await updateDashboardLayout(updateDashboardLayoutSchema.parse(args));
 
       case "get_widget_parameter_mappings":
         logger.debug(`Handling get_widget_parameter_mappings`);
