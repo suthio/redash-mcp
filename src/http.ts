@@ -1,43 +1,69 @@
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import express from 'express';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
+import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { createRedashClient, setActiveClient } from './redashClient.js';
 import { createServer } from './index.js';
 import { logger } from './logger.js';
+import { RedashOAuthProvider, getRedashApiKeyFromAuth } from './auth.js';
 import type { Request, Response } from 'express';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+
+const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || '8080'}`;
+
+const oauthProvider = new RedashOAuthProvider();
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
+
+// OAuth routes (metadata, register, authorize, token, revoke)
+app.use(mcpAuthRouter({
+  provider: oauthProvider,
+  issuerUrl: new URL(BASE_URL),
+  baseUrl: new URL(BASE_URL),
+  resourceServerUrl: new URL(`${BASE_URL}/mcp`),
+  scopesSupported: [],
+}));
+
+// Parse URL-encoded form bodies for /authorize/submit
+app.use('/authorize/submit', express.urlencoded({ extended: false }));
+
+// Handle the authorization form submission
+app.use('/authorize/submit', (req: Request, res: Response, next) => {
+  if (req.method !== 'POST') return next();
+  const { client_id, redirect_uri, code_challenge, state, api_key } = req.body;
+  if (!client_id || !redirect_uri || !code_challenge || !api_key) {
+    res.status(400).send('Missing required fields');
+    return;
+  }
+  oauthProvider.handleAuthorizeSubmit(client_id, redirect_uri, code_challenge, state || undefined, api_key, res);
+});
 
 // Health check
 app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
+// Bearer auth middleware for /mcp endpoints
+const bearerAuth = requireBearerAuth({ verifier: oauthProvider });
+
 // Session management
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
-// API Key validation middleware for all /mcp endpoints
-function requireApiKey(req: Request, res: Response): boolean {
-  const apiKey = req.headers['x-redash-api-key'] as string;
-  if (!apiKey) {
-    res.status(401).json({ error: 'X-Redash-API-Key header is required' });
-    return false;
-  }
-  try {
-    const client = createRedashClient(apiKey);
-    setActiveClient(client);
-    return true;
-  } catch (error) {
-    res.status(400).json({ error: 'Invalid Redash configuration' });
-    return false;
-  }
+// Set up Redash client from auth info
+function setupRedashClient(req: Request): void {
+  const auth = (req as any).auth as AuthInfo;
+  const apiKey = getRedashApiKeyFromAuth(auth);
+  const client = createRedashClient(apiKey);
+  setActiveClient(client);
 }
 
 // MCP POST endpoint
-app.post('/mcp', async (req: Request, res: Response) => {
-  if (!requireApiKey(req, res)) return;
+app.post('/mcp', bearerAuth, async (req: Request, res: Response) => {
+  setupRedashClient(req);
 
   const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
@@ -91,8 +117,8 @@ app.post('/mcp', async (req: Request, res: Response) => {
 });
 
 // SSE stream endpoint
-app.get('/mcp', async (req: Request, res: Response) => {
-  if (!requireApiKey(req, res)) return;
+app.get('/mcp', bearerAuth, async (req: Request, res: Response) => {
+  setupRedashClient(req);
   const sessionId = req.headers['mcp-session-id'] as string;
   if (!sessionId || !transports.has(sessionId)) {
     res.status(404).json({ error: 'Session not found' });
@@ -106,8 +132,8 @@ app.get('/mcp', async (req: Request, res: Response) => {
 });
 
 // Session termination endpoint
-app.delete('/mcp', async (req: Request, res: Response) => {
-  if (!requireApiKey(req, res)) return;
+app.delete('/mcp', bearerAuth, async (req: Request, res: Response) => {
+  setupRedashClient(req);
   const sessionId = req.headers['mcp-session-id'] as string;
   if (!sessionId || !transports.has(sessionId)) {
     res.status(404).json({ error: 'Session not found' });
@@ -123,6 +149,7 @@ app.delete('/mcp', async (req: Request, res: Response) => {
 const PORT = parseInt(process.env.PORT || '8080');
 app.listen(PORT, () => {
   logger.info(`Redash MCP HTTP server listening on port ${PORT}`);
+  logger.info(`Base URL: ${BASE_URL}`);
 });
 
 // Graceful shutdown
