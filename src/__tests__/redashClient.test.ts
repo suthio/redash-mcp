@@ -56,14 +56,14 @@ describe('RedashClient', () => {
     it('should throw error if REDASH_URL is not set', () => {
       delete process.env.REDASH_URL;
       expect(() => new RedashClient()).toThrow(
-        'REDASH_URL and REDASH_API_KEY must be provided in .env file'
+        'REDASH_URL must be provided in environment variables'
       );
     });
 
     it('should throw error if REDASH_API_KEY is not set', () => {
       delete process.env.REDASH_API_KEY;
       expect(() => new RedashClient()).toThrow(
-        'REDASH_URL and REDASH_API_KEY must be provided in .env file'
+        'REDASH_API_KEY must be provided via header or environment variable'
       );
     });
 

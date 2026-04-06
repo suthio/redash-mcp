@@ -262,12 +262,16 @@ export class RedashClient {
   private baseUrl: string;
   private apiKey: string;
 
-  constructor() {
+  constructor(apiKey?: string) {
     this.baseUrl = process.env.REDASH_URL || '';
-    this.apiKey = process.env.REDASH_API_KEY || '';
+    this.apiKey = apiKey || process.env.REDASH_API_KEY || '';
 
-    if (!this.baseUrl || !this.apiKey) {
-      throw new Error('REDASH_URL and REDASH_API_KEY must be provided in .env file');
+    if (!this.baseUrl) {
+      throw new Error('REDASH_URL must be provided in environment variables');
+    }
+
+    if (!this.apiKey) {
+      throw new Error('REDASH_API_KEY must be provided via header or environment variable');
     }
 
     const defaultHeaders: Record<string, string> = {
@@ -1230,5 +1234,25 @@ export class RedashClient {
   }
 }
 
-// Export a singleton instance
-export const redashClient = new RedashClient();
+// Singleton for stdio mode (backward compatibility)
+export const redashClient = process.env.REDASH_API_KEY
+  ? new RedashClient()
+  : (null as unknown as RedashClient);
+
+// Factory function for HTTP mode
+export function createRedashClient(apiKey: string): RedashClient {
+  return new RedashClient(apiKey);
+}
+
+// Active client management for HTTP mode
+let _activeClient: RedashClient | null = null;
+
+export function setActiveClient(client: RedashClient): void {
+  _activeClient = client;
+}
+
+export function getActiveClient(): RedashClient {
+  if (_activeClient) return _activeClient;
+  if (!redashClient) throw new Error('No active Redash client');
+  return redashClient;
+}

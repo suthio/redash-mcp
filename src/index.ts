@@ -10,13 +10,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import * as dotenv from 'dotenv';
-import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
+import { getActiveClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { logger, LogLevel } from "./logger.js";
 
 // Load environment variables
 dotenv.config();
 
-// Create MCP server instance
+// Factory function to create a configured MCP server instance
+export function createServer(): Server {
 const server = new Server(
   {
     name: "redash-mcp",
@@ -43,7 +44,7 @@ const getQuerySchema = z.object({
 async function getQuery(params: z.infer<typeof getQuerySchema>) {
   try {
     const { queryId } = params;
-    const query = await redashClient.getQuery(queryId);
+    const query = await getActiveClient().getQuery(queryId);
 
     return {
       content: [
@@ -93,8 +94,8 @@ async function createQuery(params: z.infer<typeof createQuerySchema>) {
       tags: params.tags || []
     };
 
-    logger.debug(`Calling redashClient.createQuery with data: ${JSON.stringify(queryData)}`);
-    const result = await redashClient.createQuery(queryData);
+    logger.debug(`Calling getActiveClient().createQuery with data: ${JSON.stringify(queryData)}`);
+    const result = await getActiveClient().createQuery(queryData);
     logger.debug(`Create query result: ${JSON.stringify(result)}`);
 
     return {
@@ -153,8 +154,8 @@ async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
     if (updateData.is_archived !== undefined) queryData.is_archived = updateData.is_archived;
     if (updateData.is_draft !== undefined) queryData.is_draft = updateData.is_draft;
 
-    logger.debug(`Calling redashClient.updateQuery with data: ${JSON.stringify(queryData)}`);
-    const result = await redashClient.updateQuery(queryId, queryData);
+    logger.debug(`Calling getActiveClient().updateQuery with data: ${JSON.stringify(queryData)}`);
+    const result = await getActiveClient().updateQuery(queryId, queryData);
     logger.debug(`Update query result: ${JSON.stringify(result)}`);
 
     return {
@@ -187,7 +188,7 @@ const archiveQuerySchema = z.object({
 async function archiveQuery(params: z.infer<typeof archiveQuerySchema>) {
   try {
     const { queryId } = params;
-    const result = await redashClient.archiveQuery(queryId);
+    const result = await getActiveClient().archiveQuery(queryId);
 
     return {
       content: [
@@ -214,7 +215,7 @@ async function archiveQuery(params: z.infer<typeof archiveQuerySchema>) {
 // Tool: list_data_sources
 async function listDataSources() {
   try {
-    const dataSources = await redashClient.getDataSources();
+    const dataSources = await getActiveClient().getDataSources();
 
     return {
       content: [
@@ -248,7 +249,7 @@ const listQueriesSchema = z.object({
 async function listQueries(params: z.infer<typeof listQueriesSchema>) {
   try {
     const { page, pageSize, q } = params;
-    const queries = await redashClient.getQueries(page, pageSize, q);
+    const queries = await getActiveClient().getQueries(page, pageSize, q);
 
     logger.debug(`Listed ${queries.results.length} queries`);
     return {
@@ -282,7 +283,7 @@ const executeQuerySchema = z.object({
 async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
   try {
     const { queryId, parameters } = params;
-    const result = await redashClient.executeQuery(queryId, parameters);
+    const result = await getActiveClient().executeQuery(queryId, parameters);
 
     return {
       content: [
@@ -315,7 +316,7 @@ const getQueryResultsCsvSchema = z.object({
 async function getQueryResultsCsv(params: z.infer<typeof getQueryResultsCsvSchema>) {
   try {
     const { queryId, refresh } = params;
-    const csv = await redashClient.getQueryResultsAsCsv(queryId, refresh);
+    const csv = await getActiveClient().getQueryResultsAsCsv(queryId, refresh);
 
     return {
       content: [
@@ -348,7 +349,7 @@ const listDashboardsSchema = z.object({
 async function listDashboards(params: z.infer<typeof listDashboardsSchema>) {
   try {
     const { page, pageSize } = params;
-    const dashboards = await redashClient.getDashboards(page, pageSize);
+    const dashboards = await getActiveClient().getDashboards(page, pageSize);
 
     return {
       content: [
@@ -380,7 +381,7 @@ const getDashboardSchema = z.object({
 async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
   try {
     const { dashboardId } = params;
-    const dashboard = await redashClient.getDashboard(dashboardId);
+    const dashboard = await getActiveClient().getDashboard(dashboardId);
 
     return {
       content: [
@@ -412,7 +413,7 @@ const getDashboardBySlugSchema = z.object({
 async function getDashboardBySlug(params: z.infer<typeof getDashboardBySlugSchema>) {
   try {
     const { slug } = params;
-    const dashboard = await redashClient.getDashboardBySlug(slug);
+    const dashboard = await getActiveClient().getDashboardBySlug(slug);
 
     return {
       content: [
@@ -444,7 +445,7 @@ const getVisualizationSchema = z.object({
 async function getVisualization(params: z.infer<typeof getVisualizationSchema>) {
   try {
     const { visualizationId } = params;
-    const visualization = await redashClient.getVisualization(visualizationId);
+    const visualization = await getActiveClient().getVisualization(visualizationId);
 
     return {
       content: [
@@ -477,7 +478,7 @@ const executeAdhocQuerySchema = z.object({
 async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>) {
   try {
     const { query, dataSourceId } = params;
-    const result = await redashClient.executeAdhocQuery(query, dataSourceId);
+    const result = await getActiveClient().executeAdhocQuery(query, dataSourceId);
 
     return {
       content: [
@@ -520,7 +521,7 @@ async function createVisualization(params: z.infer<typeof createVisualizationSch
       options: params.options
     };
 
-    const result = await redashClient.createVisualization(visualizationData);
+    const result = await getActiveClient().createVisualization(visualizationData);
 
     return {
       content: [
@@ -556,7 +557,7 @@ const updateVisualizationSchema = z.object({
 async function updateVisualization(params: z.infer<typeof updateVisualizationSchema>) {
   try {
     const { visualizationId, ...updateData } = params;
-    const result = await redashClient.updateVisualization(visualizationId, updateData);
+    const result = await getActiveClient().updateVisualization(visualizationId, updateData);
 
     return {
       content: [
@@ -588,7 +589,7 @@ const deleteVisualizationSchema = z.object({
 async function deleteVisualization(params: z.infer<typeof deleteVisualizationSchema>) {
   try {
     const { visualizationId } = params;
-    await redashClient.deleteVisualization(visualizationId);
+    await getActiveClient().deleteVisualization(visualizationId);
 
     return {
       content: [
@@ -620,7 +621,7 @@ const getSchemaSchema = z.object({
 async function getSchema(params: z.infer<typeof getSchemaSchema>) {
   try {
     const { dataSourceId } = params;
-    const query = await redashClient.getSchema(dataSourceId);
+    const query = await getActiveClient().getSchema(dataSourceId);
 
     return {
       content: [
@@ -662,7 +663,7 @@ async function createDashboard(params: z.infer<typeof createDashboardSchema>) {
       name: params.name,
       tags: params.tags || []
     };
-    const result = await redashClient.createDashboard(dashboardData);
+    const result = await getActiveClient().createDashboard(dashboardData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -695,7 +696,7 @@ async function updateDashboard(params: z.infer<typeof updateDashboardSchema>) {
     if (updateData.is_draft !== undefined) dashboardData.is_draft = updateData.is_draft;
     if (updateData.dashboard_filters_enabled !== undefined) dashboardData.dashboard_filters_enabled = updateData.dashboard_filters_enabled;
 
-    const result = await redashClient.updateDashboard(dashboardId, dashboardData);
+    const result = await getActiveClient().updateDashboard(dashboardId, dashboardData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -715,7 +716,7 @@ const archiveDashboardSchema = z.object({
 
 async function archiveDashboard(params: z.infer<typeof archiveDashboardSchema>) {
   try {
-    const result = await redashClient.archiveDashboard(params.dashboardId);
+    const result = await getActiveClient().archiveDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -735,7 +736,7 @@ const forkDashboardSchema = z.object({
 
 async function forkDashboard(params: z.infer<typeof forkDashboardSchema>) {
   try {
-    const result = await redashClient.forkDashboard(params.dashboardId);
+    const result = await getActiveClient().forkDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -755,7 +756,7 @@ const getPublicDashboardSchema = z.object({
 
 async function getPublicDashboard(params: z.infer<typeof getPublicDashboardSchema>) {
   try {
-    const result = await redashClient.getPublicDashboard(params.token);
+    const result = await getActiveClient().getPublicDashboard(params.token);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -775,7 +776,7 @@ const shareDashboardSchema = z.object({
 
 async function shareDashboard(params: z.infer<typeof shareDashboardSchema>) {
   try {
-    const result = await redashClient.shareDashboard(params.dashboardId);
+    const result = await getActiveClient().shareDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -795,7 +796,7 @@ const unshareDashboardSchema = z.object({
 
 async function unshareDashboard(params: z.infer<typeof unshareDashboardSchema>) {
   try {
-    const result = await redashClient.unshareDashboard(params.dashboardId);
+    const result = await getActiveClient().unshareDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -816,7 +817,7 @@ const getMyDashboardsSchema = z.object({
 
 async function getMyDashboards(params: z.infer<typeof getMyDashboardsSchema>) {
   try {
-    const result = await redashClient.getMyDashboards(params.page, params.pageSize);
+    const result = await getActiveClient().getMyDashboards(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -837,7 +838,7 @@ const getFavoriteDashboardsSchema = z.object({
 
 async function getFavoriteDashboards(params: z.infer<typeof getFavoriteDashboardsSchema>) {
   try {
-    const result = await redashClient.getFavoriteDashboards(params.page, params.pageSize);
+    const result = await getActiveClient().getFavoriteDashboards(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -857,7 +858,7 @@ const addDashboardFavoriteSchema = z.object({
 
 async function addDashboardFavorite(params: z.infer<typeof addDashboardFavoriteSchema>) {
   try {
-    const result = await redashClient.addDashboardFavorite(params.dashboardId);
+    const result = await getActiveClient().addDashboardFavorite(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -877,7 +878,7 @@ const removeDashboardFavoriteSchema = z.object({
 
 async function removeDashboardFavorite(params: z.infer<typeof removeDashboardFavoriteSchema>) {
   try {
-    const result = await redashClient.removeDashboardFavorite(params.dashboardId);
+    const result = await getActiveClient().removeDashboardFavorite(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -893,7 +894,7 @@ async function removeDashboardFavorite(params: z.infer<typeof removeDashboardFav
 // Tool: get_dashboard_tags
 async function getDashboardTags() {
   try {
-    const result = await redashClient.getDashboardTags();
+    const result = await getActiveClient().getDashboardTags();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -911,7 +912,7 @@ async function getDashboardTags() {
 // Tool: list_alerts
 async function listAlerts() {
   try {
-    const result = await redashClient.getAlerts();
+    const result = await getActiveClient().getAlerts();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -931,7 +932,7 @@ const getAlertSchema = z.object({
 
 async function getAlert(params: z.infer<typeof getAlertSchema>) {
   try {
-    const result = await redashClient.getAlert(params.alertId);
+    const result = await getActiveClient().getAlert(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -966,7 +967,7 @@ async function createAlert(params: z.infer<typeof createAlertSchema>) {
       options: params.options,
       rearm: params.rearm
     };
-    const result = await redashClient.createAlert(alertData);
+    const result = await getActiveClient().createAlert(alertData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1003,7 +1004,7 @@ async function updateAlert(params: z.infer<typeof updateAlertSchema>) {
     if (updateData.options !== undefined) alertData.options = updateData.options;
     if (updateData.rearm !== undefined) alertData.rearm = updateData.rearm;
 
-    const result = await redashClient.updateAlert(alertId, alertData);
+    const result = await getActiveClient().updateAlert(alertId, alertData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1023,7 +1024,7 @@ const deleteAlertSchema = z.object({
 
 async function deleteAlert(params: z.infer<typeof deleteAlertSchema>) {
   try {
-    const result = await redashClient.deleteAlert(params.alertId);
+    const result = await getActiveClient().deleteAlert(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1043,7 +1044,7 @@ const muteAlertSchema = z.object({
 
 async function muteAlert(params: z.infer<typeof muteAlertSchema>) {
   try {
-    const result = await redashClient.muteAlert(params.alertId);
+    const result = await getActiveClient().muteAlert(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1063,7 +1064,7 @@ const getAlertSubscriptionsSchema = z.object({
 
 async function getAlertSubscriptions(params: z.infer<typeof getAlertSubscriptionsSchema>) {
   try {
-    const result = await redashClient.getAlertSubscriptions(params.alertId);
+    const result = await getActiveClient().getAlertSubscriptions(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1087,7 +1088,7 @@ async function addAlertSubscription(params: z.infer<typeof addAlertSubscriptionS
     const subscriptionData: CreateAlertSubscriptionRequest = {};
     if (params.destination_id !== undefined) subscriptionData.destination_id = params.destination_id;
 
-    const result = await redashClient.addAlertSubscription(params.alertId, subscriptionData);
+    const result = await getActiveClient().addAlertSubscription(params.alertId, subscriptionData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1108,7 +1109,7 @@ const removeAlertSubscriptionSchema = z.object({
 
 async function removeAlertSubscription(params: z.infer<typeof removeAlertSubscriptionSchema>) {
   try {
-    const result = await redashClient.removeAlertSubscription(params.alertId, params.subscriptionId);
+    const result = await getActiveClient().removeAlertSubscription(params.alertId, params.subscriptionId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1130,7 +1131,7 @@ const forkQuerySchema = z.object({
 
 async function forkQuery(params: z.infer<typeof forkQuerySchema>) {
   try {
-    const result = await redashClient.forkQuery(params.queryId);
+    const result = await getActiveClient().forkQuery(params.queryId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1151,7 +1152,7 @@ const getMyQueriesSchema = z.object({
 
 async function getMyQueries(params: z.infer<typeof getMyQueriesSchema>) {
   try {
-    const result = await redashClient.getMyQueries(params.page, params.pageSize);
+    const result = await getActiveClient().getMyQueries(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1172,7 +1173,7 @@ const getRecentQueriesSchema = z.object({
 
 async function getRecentQueries(params: z.infer<typeof getRecentQueriesSchema>) {
   try {
-    const result = await redashClient.getRecentQueries(params.page, params.pageSize);
+    const result = await getActiveClient().getRecentQueries(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1188,7 +1189,7 @@ async function getRecentQueries(params: z.infer<typeof getRecentQueriesSchema>) 
 // Tool: get_query_tags
 async function getQueryTags() {
   try {
-    const result = await redashClient.getQueryTags();
+    const result = await getActiveClient().getQueryTags();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1209,7 +1210,7 @@ const getFavoriteQueriesSchema = z.object({
 
 async function getFavoriteQueries(params: z.infer<typeof getFavoriteQueriesSchema>) {
   try {
-    const result = await redashClient.getFavoriteQueries(params.page, params.pageSize);
+    const result = await getActiveClient().getFavoriteQueries(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1229,7 +1230,7 @@ const addQueryFavoriteSchema = z.object({
 
 async function addQueryFavorite(params: z.infer<typeof addQueryFavoriteSchema>) {
   try {
-    const result = await redashClient.addQueryFavorite(params.queryId);
+    const result = await getActiveClient().addQueryFavorite(params.queryId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1249,7 +1250,7 @@ const removeQueryFavoriteSchema = z.object({
 
 async function removeQueryFavorite(params: z.infer<typeof removeQueryFavoriteSchema>) {
   try {
-    const result = await redashClient.removeQueryFavorite(params.queryId);
+    const result = await getActiveClient().removeQueryFavorite(params.queryId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1267,7 +1268,7 @@ async function removeQueryFavorite(params: z.infer<typeof removeQueryFavoriteSch
 // Tool: list_widgets
 async function listWidgets() {
   try {
-    const result = await redashClient.getWidgets();
+    const result = await getActiveClient().getWidgets();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1287,7 +1288,7 @@ const getWidgetSchema = z.object({
 
 async function getWidget(params: z.infer<typeof getWidgetSchema>) {
   try {
-    const result = await redashClient.getWidget(params.widgetId);
+    const result = await getActiveClient().getWidget(params.widgetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1318,7 +1319,7 @@ async function createWidget(params: z.infer<typeof createWidgetSchema>) {
       width: params.width,
       options: params.options || {}
     };
-    const result = await redashClient.createWidget(widgetData);
+    const result = await getActiveClient().createWidget(widgetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1349,7 +1350,7 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
     if (updateData.width !== undefined) widgetData.width = updateData.width;
     if (updateData.options !== undefined) widgetData.options = updateData.options;
 
-    const result = await redashClient.updateWidget(widgetId, widgetData);
+    const result = await getActiveClient().updateWidget(widgetId, widgetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1369,7 +1370,7 @@ const deleteWidgetSchema = z.object({
 
 async function deleteWidget(params: z.infer<typeof deleteWidgetSchema>) {
   try {
-    const result = await redashClient.deleteWidget(params.widgetId);
+    const result = await getActiveClient().deleteWidget(params.widgetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1387,7 +1388,7 @@ async function deleteWidget(params: z.infer<typeof deleteWidgetSchema>) {
 // Tool: list_query_snippets
 async function listQuerySnippets() {
   try {
-    const result = await redashClient.getQuerySnippets();
+    const result = await getActiveClient().getQuerySnippets();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1407,7 +1408,7 @@ const getQuerySnippetSchema = z.object({
 
 async function getQuerySnippet(params: z.infer<typeof getQuerySnippetSchema>) {
   try {
-    const result = await redashClient.getQuerySnippet(params.snippetId);
+    const result = await getActiveClient().getQuerySnippet(params.snippetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1434,7 +1435,7 @@ async function createQuerySnippet(params: z.infer<typeof createQuerySnippetSchem
       description: params.description,
       snippet: params.snippet
     };
-    const result = await redashClient.createQuerySnippet(snippetData);
+    const result = await getActiveClient().createQuerySnippet(snippetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1463,7 +1464,7 @@ async function updateQuerySnippet(params: z.infer<typeof updateQuerySnippetSchem
     if (updateData.description !== undefined) snippetData.description = updateData.description;
     if (updateData.snippet !== undefined) snippetData.snippet = updateData.snippet;
 
-    const result = await redashClient.updateQuerySnippet(snippetId, snippetData);
+    const result = await getActiveClient().updateQuerySnippet(snippetId, snippetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1483,7 +1484,7 @@ const deleteQuerySnippetSchema = z.object({
 
 async function deleteQuerySnippet(params: z.infer<typeof deleteQuerySnippetSchema>) {
   try {
-    const result = await redashClient.deleteQuerySnippet(params.snippetId);
+    const result = await getActiveClient().deleteQuerySnippet(params.snippetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1501,7 +1502,7 @@ async function deleteQuerySnippet(params: z.infer<typeof deleteQuerySnippetSchem
 // Tool: list_destinations
 async function listDestinations() {
   try {
-    const result = await redashClient.getDestinations();
+    const result = await getActiveClient().getDestinations();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1521,7 +1522,7 @@ async function listDestinations() {
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
   try {
     // List queries as resources
-    const queries = await redashClient.getQueries(1, 100);
+    const queries = await getActiveClient().getQueries(1, 100);
     const queryResources = queries.results.map(query => ({
       uri: `redash://query/${query.id}`,
       name: query.name,
@@ -1529,7 +1530,7 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
     }));
 
     // List dashboards as resources
-    const dashboards = await redashClient.getDashboards(1, 100);
+    const dashboards = await getActiveClient().getDashboards(1, 100);
     const dashboardResources = dashboards.results.map(dashboard => ({
       uri: `redash://dashboard/${dashboard.id}`,
       name: dashboard.name,
@@ -1562,8 +1563,8 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const resourceId = parseInt(id, 10);
 
     if (type === 'query') {
-      const query = await redashClient.getQuery(resourceId);
-      const result = await redashClient.executeQuery(resourceId);
+      const query = await getActiveClient().getQuery(resourceId);
+      const result = await getActiveClient().executeQuery(resourceId);
 
       return {
         contents: [
@@ -1578,7 +1579,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
         ]
       };
     } else if (type === 'dashboard') {
-      const dashboard = await redashClient.getDashboard(resourceId);
+      const dashboard = await getActiveClient().getDashboard(resourceId);
 
       return {
         contents: [
@@ -2585,9 +2586,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+return server;
+} // end createServer()
+
 // Start the server with stdio transport
 async function main() {
   try {
+    const server = createServer();
     const transport = new StdioServerTransport();
 
     logger.info("Starting Redash MCP server...");
@@ -2600,4 +2605,9 @@ async function main() {
   }
 }
 
-main();
+// stdio モードの場合のみ main() を実行
+// http.ts から import された場合は実行しない
+const isDirectRun = process.argv[1]?.includes('index') || process.argv[1]?.includes('cli');
+if (isDirectRun) {
+  main();
+}
