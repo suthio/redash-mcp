@@ -439,13 +439,14 @@ async function getVisualization(params: z.infer<typeof getVisualizationSchema>) 
 // Tool: execute_adhoc_query
 const executeAdhocQuerySchema = z.object({
   query: z.string(),
-  dataSourceId: z.coerce.number()
+  dataSourceId: z.coerce.number(),
+  applyAutoLimit: z.boolean().optional()
 });
 
 async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>) {
   try {
-    const { query, dataSourceId } = params;
-    const result = await redashClient.executeAdhocQuery(query, dataSourceId);
+    const { query, dataSourceId, applyAutoLimit } = params;
+    const result = await redashClient.executeAdhocQuery(query, dataSourceId, applyAutoLimit);
 
     return {
       content: [
@@ -1717,7 +1718,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             query: { type: "string", description: "SQL query to execute" },
-            dataSourceId: { type: "number", description: "ID of the data source to query against" }
+            dataSourceId: { type: "number", description: "ID of the data source to query against" },
+            applyAutoLimit: { type: "boolean", description: "Whether Redash should apply auto LIMIT to the query. Defaults to true. Set to false for MSSQL data sources (mssql/mssql_odbc), where the injected LIMIT clause is invalid T-SQL and causes the query to fail." }
           },
           required: ["query", "dataSourceId"]
         }
