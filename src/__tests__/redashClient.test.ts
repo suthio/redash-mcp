@@ -336,7 +336,7 @@ describe('RedashClient', () => {
 
       expect(mockAxiosInstance.post).toHaveBeenCalledWith(
         '/api/queries/123/results',
-        { parameters: undefined }
+        { parameters: undefined, max_age: undefined }
       );
       expect(result).toEqual(mockResult);
     });
@@ -349,7 +349,18 @@ describe('RedashClient', () => {
 
       expect(mockAxiosInstance.post).toHaveBeenCalledWith(
         '/api/queries/123/results',
-        { parameters: params }
+        { parameters: params, max_age: undefined }
+      );
+    });
+
+    it('should execute a query with max age override', async () => {
+      mockAxiosInstance.post.mockResolvedValue({ data: {} });
+
+      await client.executeQuery(123, { category: 'example-value' }, 0);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+        '/api/queries/123/results',
+        { parameters: { category: 'example-value' }, max_age: 0 }
       );
     });
 
