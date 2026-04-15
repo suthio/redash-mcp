@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import {
   mergeNamedEntries,
   queryParameterPatchSchema,
@@ -6,6 +7,7 @@ import {
   toNamedRecord,
   widgetParameterMappingPatchSchema,
 } from '../parameterManagement.js';
+import { logger } from '../logger.js';
 
 describe('parameterManagement helpers', () => {
   it('merges named entries without losing existing fields', () => {
@@ -60,6 +62,33 @@ describe('parameterManagement helpers', () => {
     expect(resolveParameterOrder(['a', 'b'], ['b', 'c'], { explicitOrder: ['c'] })).toEqual(['c', 'b']);
   });
 
+  it('does not merge removed fields back in when replace mode is enabled', () => {
+    const result = mergeNamedEntries(
+      [
+        {
+          name: 'stage1',
+          title: 'Stage 1',
+          type: 'text',
+          value: 'keep-me-out',
+        },
+      ],
+      [
+        {
+          name: 'stage1',
+          title: 'Replacement',
+        } as any,
+      ],
+      { replace: true }
+    );
+
+    expect(result).toEqual([
+      {
+        name: 'stage1',
+        title: 'Replacement',
+      },
+    ]);
+  });
+
   it('round-trips named records for widget mappings', () => {
     const entries = toNamedEntries({
       stage1: { type: 'dashboard-level', mapTo: 'stage1', title: 'Stage 1' },
@@ -74,6 +103,21 @@ describe('parameterManagement helpers', () => {
       stage1: { name: 'stage1', type: 'dashboard-level', mapTo: 'stage1', title: 'Stage 1' },
       stage2: { name: 'stage2', type: 'static-value', value: 'x' },
     });
+  });
+
+  it('warns when named record values are not objects', () => {
+    const warningSpy = jest.spyOn(logger, 'warning').mockImplementation(() => {});
+
+    expect(toNamedEntries({
+      stage1: 'oops',
+      stage2: 42,
+    } as any)).toEqual([
+      { name: 'stage1' },
+      { name: 'stage2' },
+    ]);
+
+    expect(warningSpy).toHaveBeenCalledTimes(2);
+    warningSpy.mockRestore();
   });
 
   it('validates query and widget parameter patches', () => {

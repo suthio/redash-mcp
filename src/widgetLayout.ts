@@ -11,10 +11,10 @@ export const dashboardGridDefaults = {
 };
 
 export const widgetPositionSchema = z.object({
-  col: z.coerce.number().int().min(0).optional(),
+  col: z.coerce.number().int().min(0).max(dashboardGridDefaults.columns - 1).optional(),
   row: z.coerce.number().int().min(0).optional(),
-  sizeX: z.coerce.number().int().optional(),
-  sizeY: z.coerce.number().int().optional(),
+  sizeX: z.coerce.number().int().min(dashboardGridDefaults.minSizeX).max(dashboardGridDefaults.maxSizeX).optional(),
+  sizeY: z.coerce.number().int().min(dashboardGridDefaults.minSizeY).max(dashboardGridDefaults.maxSizeY).optional(),
   autoHeight: z.boolean().optional(),
 }).strict();
 

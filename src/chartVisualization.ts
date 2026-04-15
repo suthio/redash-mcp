@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { cloneValue, mergeDeep } from './utils.js';
 
 const chartTypes = ['line', 'column', 'area', 'pie', 'scatter', 'bubble', 'heatmap', 'box', 'custom'] as const;
 
@@ -34,33 +35,6 @@ const chartOptionKeys = [
   'linkFormat',
   'missingValuesAsZero'
 ] as const;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Object.prototype.toString.call(value) === '[object Object]';
-}
-
-function cloneValue<T>(value: T): T {
-  return structuredClone(value);
-}
-
-export function mergeDeep<T extends Record<string, unknown>>(base: T, patch: Record<string, unknown>): T {
-  const result: Record<string, unknown> = cloneValue(base);
-
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined) {
-      continue;
-    }
-
-    const existing = result[key];
-    if (isPlainObject(existing) && isPlainObject(value)) {
-      result[key] = mergeDeep(existing, value);
-    } else {
-      result[key] = cloneValue(value);
-    }
-  }
-
-  return result as T;
-}
 
 const chartLegendSchema = z.object({
   enabled: z.boolean().optional(),
@@ -128,4 +102,12 @@ export function buildChartVisualizationOptionsPatch(params: ChartVisualizationUp
   }
 
   return patch;
+}
+
+export function buildChartVisualizationOptions(
+  params: ChartVisualizationUpdateInput,
+  currentOptions: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  const optionsPatch = buildChartVisualizationOptionsPatch(params);
+  return params.replaceOptions ? optionsPatch : mergeDeep((currentOptions ?? {}) as Record<string, unknown>, optionsPatch);
 }

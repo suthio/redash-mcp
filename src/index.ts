@@ -11,9 +11,10 @@ import {
 import { z } from "zod";
 import * as dotenv from 'dotenv';
 import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
-import { buildChartVisualizationOptionsPatch, chartVisualizationUpdateSchema, mergeDeep } from "./chartVisualization.js";
+import { buildChartVisualizationOptions, chartVisualizationUpdateSchema } from "./chartVisualization.js";
 import { mergeNamedEntries, queryParameterPatchSchema, queryParameterTypeValues, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema, widgetParameterMappingTypeValues } from "./parameterManagement.js";
 import { buildParameterizedExecutionParameters, ParameterizedExecutionError } from "./parameterizedExecution.js";
+import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
 import { logger, LogLevel } from "./logger.js";
 
@@ -89,10 +90,10 @@ const widgetParameterMappingJsonSchema = {
 const widgetPositionJsonSchema = {
   type: "object",
   properties: {
-    col: { type: "number", description: "Grid column, starting at 0" },
-    row: { type: "number", description: "Grid row, starting at 0" },
-    sizeX: { type: "number", description: "Widget width in grid columns" },
-    sizeY: { type: "number", description: "Widget height in grid rows" },
+    col: { type: "number", minimum: 0, maximum: dashboardGridDefaults.columns - 1, description: "Grid column, starting at 0" },
+    row: { type: "number", minimum: 0, description: "Grid row, starting at 0" },
+    sizeX: { type: "number", minimum: dashboardGridDefaults.minSizeX, maximum: dashboardGridDefaults.maxSizeX, description: "Widget width in grid columns" },
+    sizeY: { type: "number", minimum: dashboardGridDefaults.minSizeY, maximum: dashboardGridDefaults.maxSizeY, description: "Widget height in grid rows" },
     autoHeight: { type: "boolean", description: "Whether the widget height should auto-grow" }
   },
   additionalProperties: false
@@ -841,17 +842,9 @@ async function updateVisualization(params: z.infer<typeof updateVisualizationSch
 // Tool: update_chart_visualization
 async function updateChartVisualization(params: z.infer<typeof chartVisualizationUpdateSchema>) {
   try {
-    const { visualizationId, replaceOptions, chartOptions, ...metadata } = params;
+    const { visualizationId, replaceOptions, chartOptions: _chartOptions, ...metadata } = params;
     const currentVisualization = replaceOptions ? null : await redashClient.getVisualization(visualizationId);
-    const optionsPatch = buildChartVisualizationOptionsPatch({
-      visualizationId,
-      replaceOptions,
-      chartOptions,
-      ...metadata,
-    });
-    const options = replaceOptions
-      ? optionsPatch
-      : mergeDeep((currentVisualization?.options ?? {}) as Record<string, unknown>, optionsPatch);
+    const options = buildChartVisualizationOptions(params, (currentVisualization?.options ?? {}) as Record<string, unknown>);
 
     const result = await redashClient.updateVisualization(visualizationId, {
       ...metadata,
@@ -867,7 +860,7 @@ async function updateChartVisualization(params: z.infer<typeof chartVisualizatio
       ]
     };
   } catch (error) {
-    console.error(`Error updating chart visualization ${params.visualizationId}:`, error);
+    logger.error(`Error updating chart visualization ${params.visualizationId}: ${error}`);
     return {
       isError: true,
       content: [
@@ -1752,13 +1745,20 @@ const updateWidgetSchema = z.object({
 async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
   try {
     const { widgetId, position, ...updateData } = params;
-    const currentWidget = await redashClient.getWidget(widgetId);
     const widgetData: UpdateWidgetRequest = {};
     if (updateData.visualization_id !== undefined) widgetData.visualization_id = updateData.visualization_id;
-    widgetData.text = updateData.text !== undefined ? updateData.text : (currentWidget.text ?? "");
+    if (updateData.text !== undefined) widgetData.text = updateData.text;
     if (updateData.width !== undefined) widgetData.width = updateData.width;
-    const currentOptions = updateData.options !== undefined ? updateData.options : (currentWidget.options ?? {});
-    widgetData.options = position ? buildWidgetLayoutOptions(currentOptions, position) : currentOptions;
+    if (updateData.options !== undefined) widgetData.options = updateData.options;
+
+    if (position) {
+      const currentWidget = await redashClient.getWidget(widgetId);
+      const currentOptions = updateData.options !== undefined ? updateData.options : (currentWidget.options ?? {});
+      widgetData.options = buildWidgetLayoutOptions(currentOptions, position);
+      if (updateData.text === undefined) {
+        widgetData.text = currentWidget.text ?? "";
+      }
+    }
 
     const result = await redashClient.updateWidget(widgetId, widgetData);
     return {
@@ -1816,7 +1816,7 @@ async function updateDashboardLayout(params: z.infer<typeof updateDashboardLayou
       }
     }
 
-    const results = await Promise.all(params.widgets.map(async (layout) => {
+    const results = await Promise.allSettled(params.widgets.map(async (layout) => {
       const widget = dashboardWidgets.get(layout.widgetId)!;
       return redashClient.updateWidget(layout.widgetId, {
         text: widget.text ?? "",
@@ -1824,13 +1824,31 @@ async function updateDashboardLayout(params: z.infer<typeof updateDashboardLayou
       });
     }));
 
+    const widgetResults = results.map((result, index) => {
+      const { widgetId } = params.widgets[index];
+      if (result.status === "fulfilled") {
+        return {
+          widgetId,
+          success: true,
+          widget: summarizeWidgetLayout(result.value)
+        };
+      }
+
+      return {
+        widgetId,
+        success: false,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason)
+      };
+    });
+
     return {
+      isError: widgetResults.some((result) => !result.success),
       content: [
         {
           type: "text",
           text: JSON.stringify({
             dashboardId: dashboard.id,
-            updatedWidgets: results.map(summarizeWidgetLayout)
+            widgetResults
           }, null, 2)
         }
       ]
@@ -2255,7 +2273,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             queryId: { type: "number", description: "ID of the query" },
             parameters: { type: "array", items: queryParameterJsonSchema, description: "Parameter definitions to merge into the query" },
-            removeParameterNames: stringArrayJsonSchema,
+            removeParameterNames: { ...stringArrayJsonSchema, description: "Saved parameter names to remove from the query" },
             replaceParameters: { type: "boolean", description: "Replace the stored parameter list instead of merging" }
           },
           required: ["queryId"]
@@ -2551,9 +2569,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             dashboardId: { type: "number", description: "ID of the dashboard" },
             parameters: { type: "array", items: queryParameterJsonSchema, description: "Dashboard parameter values to merge into the dashboard" },
-            removeParameterNames: stringArrayJsonSchema,
+            removeParameterNames: { ...stringArrayJsonSchema, description: "Dashboard parameter names to remove from the dashboard" },
             replaceParameters: { type: "boolean", description: "Replace the stored parameter list instead of merging" },
-            globalParamOrder: stringArrayJsonSchema
+            globalParamOrder: { ...stringArrayJsonSchema, description: "Explicit display order for dashboard parameters" }
           },
           required: ["dashboardId"]
         }
@@ -2933,7 +2951,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "update_dashboard_layout",
-        description: "Move or resize multiple widgets on a dashboard in one call",
+        description: "Move or resize multiple widgets on a dashboard in one call and report per-widget outcomes",
         inputSchema: {
           type: "object",
           properties: {
@@ -2962,7 +2980,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             widgetId: { type: "number", description: "ID of the widget" },
             parameterMappings: { type: "array", items: widgetParameterMappingJsonSchema, description: "Parameter mappings to merge into the widget" },
-            removeParameterNames: stringArrayJsonSchema,
+            removeParameterNames: { ...stringArrayJsonSchema, description: "Widget parameter mapping names to remove" },
             replaceParameterMappings: { type: "boolean", description: "Replace the stored mappings instead of merging" }
           },
           required: ["widgetId"]

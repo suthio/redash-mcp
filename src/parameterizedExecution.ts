@@ -1,4 +1,5 @@
 import { queryParameterTypeValues } from './parameterManagement.js';
+import { cloneValue, isPlainObject } from './utils.js';
 
 export type QueryParameterType = (typeof queryParameterTypeValues)[number];
 
@@ -20,10 +21,6 @@ export interface BuildParameterizedExecutionOptions {
 }
 
 export class ParameterizedExecutionError extends Error {}
-
-function isPlainObject(value: unknown): value is Record<string, any> {
-  return Object.prototype.toString.call(value) === '[object Object]';
-}
 
 function hasOwn(object: Record<string, any>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(object, key);
@@ -74,6 +71,7 @@ function endOfDay(value: Date): Date {
 }
 
 function startOfWeek(value: Date): Date {
+  // Redash's built-in dynamic ranges are resolved against a Sunday-start week here.
   return startOfDay(addDays(value, -value.getDay()));
 }
 
@@ -127,6 +125,73 @@ function formatDateValue(value: Date, type: QueryParameterType): string {
   }
 }
 
+const isoDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+const isoLocalDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(\.(\d{1,3}))?)?$/;
+const isoZonedDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})$/;
+
+function parseIsoDateComponent(value: string): number {
+  return Number.parseInt(value, 10);
+}
+
+function createLocalDate(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+  millisecond = 0
+): Date | undefined {
+  const result = new Date(year, month - 1, day, hour, minute, second, millisecond);
+  if (
+    result.getFullYear() !== year ||
+    result.getMonth() !== month - 1 ||
+    result.getDate() !== day ||
+    result.getHours() !== hour ||
+    result.getMinutes() !== minute ||
+    result.getSeconds() !== second ||
+    result.getMilliseconds() !== millisecond
+  ) {
+    return undefined;
+  }
+
+  return result;
+}
+
+function parseIsoDateString(value: string): Date | undefined {
+  const dateOnlyMatch = value.match(isoDatePattern);
+  if (dateOnlyMatch) {
+    return createLocalDate(
+      parseIsoDateComponent(dateOnlyMatch[1]),
+      parseIsoDateComponent(dateOnlyMatch[2]),
+      parseIsoDateComponent(dateOnlyMatch[3])
+    );
+  }
+
+  const localDateTimeMatch = value.match(isoLocalDateTimePattern);
+  if (localDateTimeMatch) {
+    return createLocalDate(
+      parseIsoDateComponent(localDateTimeMatch[1]),
+      parseIsoDateComponent(localDateTimeMatch[2]),
+      parseIsoDateComponent(localDateTimeMatch[3]),
+      parseIsoDateComponent(localDateTimeMatch[4]),
+      parseIsoDateComponent(localDateTimeMatch[5]),
+      localDateTimeMatch[6] ? parseIsoDateComponent(localDateTimeMatch[6]) : 0,
+      localDateTimeMatch[8] ? Number(localDateTimeMatch[8].padEnd(3, '0')) : 0
+    );
+  }
+
+  if (isoZonedDateTimePattern.test(value)) {
+    const normalizedValue = value.includes('T') ? value : value.replace(' ', 'T');
+    const result = new Date(normalizedValue);
+    if (!Number.isNaN(result.getTime())) {
+      return result;
+    }
+  }
+
+  return undefined;
+}
+
 function coerceDate(value: unknown): Date {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return cloneDate(value);
@@ -140,8 +205,8 @@ function coerceDate(value: unknown): Date {
   }
 
   if (typeof value === 'string') {
-    const result = new Date(value);
-    if (!Number.isNaN(result.getTime())) {
+    const result = parseIsoDateString(value);
+    if (result) {
       return result;
     }
   }
@@ -381,7 +446,7 @@ export function buildParameterizedExecutionParameters(
   const now = options.now || new Date();
 
   if (!Array.isArray(definitions) || definitions.length === 0) {
-    return structuredClone(providedParameters);
+    return cloneValue(providedParameters);
   }
 
   const definitionNames = new Set(definitions.map((definition) => definition.name));

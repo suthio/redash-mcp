@@ -1,4 +1,5 @@
-import { buildChartVisualizationOptionsPatch, chartVisualizationUpdateSchema, mergeDeep } from '../chartVisualization.js';
+import { buildChartVisualizationOptions, buildChartVisualizationOptionsPatch, chartVisualizationUpdateSchema } from '../chartVisualization.js';
+import { mergeDeep } from '../utils.js';
 
 describe('chartVisualization helpers', () => {
   it('deep-merges chart option patches', () => {
@@ -46,6 +47,25 @@ describe('chartVisualization helpers', () => {
       globalSeriesType: 'column',
       sortX: true,
       legend: { enabled: false, placement: 'below' },
+      series: { stacking: 'stack' },
+    });
+  });
+
+  it('replaces existing chart options when replaceOptions is enabled', () => {
+    const input = chartVisualizationUpdateSchema.parse({
+      visualizationId: 184,
+      replaceOptions: true,
+      legend: { enabled: false },
+      chartOptions: {
+        series: { stacking: 'stack' },
+      },
+    });
+
+    expect(buildChartVisualizationOptions(input, {
+      legend: { enabled: true, placement: 'below' },
+      columnMapping: { x: 'send_hour' },
+    })).toEqual({
+      legend: { enabled: false },
       series: { stacking: 'stack' },
     });
   });

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { logger } from './logger.js';
+import { cloneValue, isPlainObject, mergeDeep } from './utils.js';
 
 export const queryParameterTypeValues = [
   'text',
@@ -19,33 +21,6 @@ export const widgetParameterMappingTypeValues = [
   'widget-level',
   'static-value'
 ] as const;
-
-function isPlainObject(value: unknown): value is Record<string, any> {
-  return Object.prototype.toString.call(value) === '[object Object]';
-}
-
-function cloneValue<T>(value: T): T {
-  return structuredClone(value);
-}
-
-export function mergeDeep<T extends Record<string, any>>(base: T, patch: Record<string, any>): T {
-  const result: Record<string, any> = cloneValue(base);
-
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined) {
-      continue;
-    }
-
-    const existing = result[key];
-    if (isPlainObject(existing) && isPlainObject(value)) {
-      result[key] = mergeDeep(existing, value);
-    } else {
-      result[key] = cloneValue(value);
-    }
-  }
-
-  return result as T;
-}
 
 const multiValuesOptionsSchema = z.object({
   prefix: z.string().optional(),
@@ -102,7 +77,11 @@ export function mergeNamedEntries<T extends { name: string }>(
   for (const patch of patches) {
     const patchValue = cloneValue(patch) as Record<string, any> & { name: string };
     const currentIndex = indexByName.get(patch.name);
-    const baseValue = existingByName.get(patch.name);
+    const baseValue = currentIndex !== undefined
+      ? result[currentIndex]
+      : options.replace
+        ? undefined
+        : existingByName.get(patch.name);
     const mergedValue = baseValue ? mergeDeep(baseValue, patchValue) : patchValue;
 
     if (currentIndex !== undefined) {
@@ -122,10 +101,17 @@ export function toNamedEntries(record: Record<string, any> | null | undefined): 
     return [];
   }
 
-  return Object.entries(record).map(([name, value]) => ({
-    ...(isPlainObject(value) ? cloneValue(value) : {}),
-    name
-  }));
+  return Object.entries(record).map(([name, value]) => {
+    if (!isPlainObject(value)) {
+      logger.warning(`Unexpected non-object value for named entry "${name}"; falling back to the entry name only.`);
+      return { name };
+    }
+
+    return {
+      ...cloneValue(value),
+      name
+    };
+  });
 }
 
 export function toNamedRecord(entries: Array<Record<string, any> & { name: string }>): Record<string, Record<string, any>> {
