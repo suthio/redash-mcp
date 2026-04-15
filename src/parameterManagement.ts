@@ -29,31 +29,31 @@ const multiValuesOptionsSchema = z.object({
 }).passthrough();
 
 export const queryParameterSchema = z.object({
-  name: z.string(),
-  title: z.string().optional(),
-  type: z.enum(queryParameterTypeValues).optional(),
-  value: z.any().optional(),
-  global: z.boolean().optional(),
-  regex: z.string().optional(),
-  enumOptions: z.union([z.string(), z.array(z.string()), z.null()]).optional(),
-  queryId: z.coerce.number().optional(),
-  multiValuesOptions: z.union([multiValuesOptionsSchema, z.null()]).optional()
+  name: z.string().describe('Parameter name'),
+  title: z.string().optional().describe('Display title'),
+  type: z.enum(queryParameterTypeValues).optional().describe('Parameter type'),
+  value: z.any().optional().describe('Default value'),
+  global: z.boolean().optional().describe('Legacy global flag'),
+  regex: z.string().optional().describe('Regex for text-pattern parameters'),
+  enumOptions: z.union([z.string(), z.array(z.string()), z.null()]).optional().describe('Dropdown options'),
+  queryId: z.coerce.number().optional().describe('Query id for query-based dropdowns'),
+  multiValuesOptions: z.union([multiValuesOptionsSchema, z.null()]).optional().describe('Multi-value formatting options')
 }).passthrough();
 
 export const queryParameterPatchSchema = queryParameterSchema.partial().extend({
-  name: z.string()
+  name: z.string().describe('Parameter name')
 }).passthrough();
 
 export const widgetParameterMappingSchema = z.object({
-  name: z.string(),
-  type: z.enum(widgetParameterMappingTypeValues).optional(),
-  mapTo: z.string().optional(),
-  value: z.any().optional(),
-  title: z.string().optional()
+  name: z.string().describe('Query parameter name'),
+  type: z.enum(widgetParameterMappingTypeValues).optional().describe('Mapping type'),
+  mapTo: z.string().optional().describe('Dashboard parameter to map to'),
+  value: z.any().optional().describe('Static value for the mapping'),
+  title: z.string().optional().describe('Dashboard parameter title')
 }).passthrough();
 
 export const widgetParameterMappingPatchSchema = widgetParameterMappingSchema.partial().extend({
-  name: z.string()
+  name: z.string().describe('Query parameter name')
 }).passthrough();
 
 export interface MergeNamedEntriesOptions {

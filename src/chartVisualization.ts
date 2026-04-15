@@ -40,11 +40,11 @@ const chartLegendSchema = z.object({
   enabled: z.boolean().optional(),
   placement: z.enum(['auto', 'below']).optional(),
   traceorder: z.enum(['normal', 'reversed']).optional(),
-}).passthrough();
+}).passthrough().describe('Legend settings');
 
 const chartDirectionSchema = z.object({
   type: z.enum(['clockwise', 'counterclockwise']).optional(),
-}).passthrough();
+}).passthrough().describe('Pie chart direction settings');
 
 export const chartVisualizationUpdateSchema = z.object({
   visualizationId: z.coerce.number(),

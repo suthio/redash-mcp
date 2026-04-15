@@ -8,11 +8,12 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import { z, type ZodTypeAny } from "zod";
 import * as dotenv from 'dotenv';
 import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { buildChartVisualizationOptions, chartVisualizationUpdateSchema } from "./chartVisualization.js";
-import { mergeNamedEntries, queryParameterPatchSchema, queryParameterTypeValues, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema, widgetParameterMappingTypeValues } from "./parameterManagement.js";
+import { mergeNamedEntries, queryParameterPatchSchema, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema } from "./parameterManagement.js";
+import { buildInputSchema, type JsonSchemaDescriptionMap } from "./jsonSchema.js";
 import { buildParameterizedExecutionParameters, ParameterizedExecutionError } from "./parameterizedExecution.js";
 import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
@@ -38,76 +39,25 @@ const server = new Server(
 // Set up server logging
 logger.info('Starting Redash MCP server...');
 
-const stringArrayJsonSchema = { type: "array", items: { type: "string" } };
+const emptyInputSchema = z.object({});
 
-const queryParameterJsonSchema = {
-  type: "object",
-  properties: {
-    name: { type: "string", description: "Parameter name" },
-    title: { type: "string", description: "Display title" },
-    type: { type: "string", enum: [...queryParameterTypeValues], description: "Parameter type" },
-    value: { description: "Default value" },
-    global: { type: "boolean", description: "Legacy global flag" },
-    regex: { type: "string", description: "Regex for text-pattern parameters" },
-    enumOptions: {
-      oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }, { type: "null" }],
-      description: "Dropdown options"
-    },
-    queryId: { type: "number", description: "Query id for query-based dropdowns" },
-    multiValuesOptions: {
-      oneOf: [
-        {
-          type: "object",
-          description: "Multi-value formatting options",
-          properties: {
-            prefix: { type: "string" },
-            suffix: { type: "string" },
-            separator: { type: "string" }
-          },
-          additionalProperties: true
-        },
-        { type: "null" }
-      ]
-    }
-  },
-  required: ["name"],
-  additionalProperties: true
-};
+function defineTool(
+  name: string,
+  description: string,
+  schema: ZodTypeAny = emptyInputSchema,
+  schemaDescriptions: JsonSchemaDescriptionMap = {}
+) {
+  return {
+    name,
+    description,
+    inputSchema: buildInputSchema(schema, schemaDescriptions),
+  };
+}
 
-const widgetParameterMappingJsonSchema = {
-  type: "object",
-  properties: {
-    name: { type: "string", description: "Query parameter name" },
-    type: { type: "string", enum: [...widgetParameterMappingTypeValues], description: "Mapping type" },
-    mapTo: { type: "string", description: "Dashboard parameter to map to" },
-    value: { description: "Static value for the mapping" },
-    title: { type: "string", description: "Dashboard parameter title" }
-  },
-  required: ["name"],
-  additionalProperties: true
-};
-
-const widgetPositionJsonSchema = {
-  type: "object",
-  properties: {
-    col: { type: "number", minimum: 0, maximum: dashboardGridDefaults.columns - 1, description: "Grid column, starting at 0" },
-    row: { type: "number", minimum: 0, description: "Grid row, starting at 0" },
-    sizeX: { type: "number", minimum: dashboardGridDefaults.minSizeX, maximum: dashboardGridDefaults.maxSizeX, description: "Widget width in grid columns" },
-    sizeY: { type: "number", minimum: dashboardGridDefaults.minSizeY, maximum: dashboardGridDefaults.maxSizeY, description: "Widget height in grid rows" },
-    autoHeight: { type: "boolean", description: "Whether the widget height should auto-grow" }
-  },
-  additionalProperties: false
-};
-
-const widgetLayoutEntryJsonSchema = {
-  type: "object",
-  properties: {
-    widgetId: { type: "number", description: "ID of the widget to move or resize" },
-    position: widgetPositionJsonSchema
-  },
-  required: ["widgetId", "position"],
-  additionalProperties: false
-};
+const paginationSchemaDescriptions = {
+  page: "Page number (starts at 1)",
+  pageSize: "Number of results per page",
+} satisfies JsonSchemaDescriptionMap;
 
 // ----- Tools Implementation -----
 
@@ -149,8 +99,8 @@ const createQuerySchema = z.object({
   data_source_id: z.coerce.number(),
   query: z.string(),
   description: z.string().optional(),
-  options: z.any().optional(),
-  schedule: z.any().optional(),
+  options: z.record(z.any()).optional(),
+  schedule: z.record(z.any()).optional(),
   tags: z.array(z.string()).optional()
 });
 
@@ -202,8 +152,8 @@ const updateQuerySchema = z.object({
   data_source_id: z.coerce.number().optional(),
   query: z.string().optional(),
   description: z.string().optional(),
-  options: z.any().optional(),
-  schedule: z.any().optional(),
+  options: z.record(z.any()).optional(),
+  schedule: z.record(z.any()).optional(),
   tags: z.array(z.string()).optional(),
   is_archived: z.boolean().optional(),
   is_draft: z.boolean().optional()
@@ -766,7 +716,7 @@ const createVisualizationSchema = z.object({
   type: z.string(),
   name: z.string(),
   description: z.string().optional(),
-  options: z.any()
+  options: z.record(z.any())
 });
 
 async function createVisualization(params: z.infer<typeof createVisualizationSchema>) {
@@ -809,7 +759,7 @@ const updateVisualizationSchema = z.object({
   type: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),
-  options: z.any().optional()
+  options: z.record(z.any()).optional()
 });
 
 async function updateVisualization(params: z.infer<typeof updateVisualizationSchema>) {
@@ -1705,7 +1655,7 @@ const createWidgetSchema = z.object({
   visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
   width: z.coerce.number(),
-  options: z.any().optional(),
+  options: z.record(z.any()).optional(),
   position: widgetPositionSchema.optional()
 });
 
@@ -1738,7 +1688,7 @@ const updateWidgetSchema = z.object({
   visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
   width: z.coerce.number().optional(),
-  options: z.any().optional(),
+  options: z.record(z.any()).optional(),
   position: widgetPositionSchema.optional()
 });
 
@@ -2190,881 +2140,337 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   }
 });
 
+const chartVisualizationSchemaDescriptions = {
+  visualizationId: "ID of the visualization to update",
+  type: "Type of visualization",
+  name: "Name of the visualization",
+  description: "Description of the visualization",
+  replaceOptions: "Replace the entire options payload instead of merging with the current config",
+  globalSeriesType: "Chart type",
+  sortX: "Sort the X axis",
+  swappedAxes: "Swap the chart axes",
+  sortY: "Sort heatmap values",
+  reverseY: "Reverse heatmap order",
+  showpoints: "Show all points for box charts",
+  alignYAxesAtZero: "Align left and right Y axes at zero",
+  xAxis: "X axis settings",
+  yAxis: "Y axis settings",
+  error_y: "Error bar settings",
+  series: "Series-wide chart settings",
+  seriesOptions: "Per-series settings keyed by series name",
+  valuesOptions: "Per-value settings",
+  columnMapping: "Column mappings such as x, y, and series",
+  sizemode: "Bubble size mode",
+  coefficient: "Bubble size coefficient",
+  piesort: "Sort pie slices",
+  color_scheme: "Color palette name",
+  lineShape: "Line interpolation",
+  showDataLabels: "Toggle data labels",
+  numberFormat: "Number format",
+  percentFormat: "Percent format",
+  dateTimeFormat: "Date/time format",
+  textFormat: "Data label template",
+  enableLink: "Enable click-through links",
+  linkOpenNewTab: "Open click-through links in a new tab",
+  linkFormat: "Click-through URL template",
+  missingValuesAsZero: "Convert missing values to zero",
+  chartOptions: "Raw Redash chart options to merge into the payload",
+} satisfies JsonSchemaDescriptionMap;
+
+const createAlertSchemaDescriptions = {
+  name: "Name of the alert",
+  query_id: "ID of the query to monitor",
+  options: "Alert options including column to monitor, operator, and threshold value",
+  "options.column": "Column name to monitor",
+  "options.op": "Comparison operator: greater than, less than, equals, not equals, etc.",
+  "options.value": "Threshold value to compare against",
+  "options.custom_subject": "Custom email subject",
+  "options.custom_body": "Custom email body",
+  rearm: "Number of seconds to wait before triggering again (null for never)",
+} satisfies JsonSchemaDescriptionMap;
+
+const updateAlertSchemaDescriptions = {
+  alertId: "ID of the alert to update",
+  name: "New name of the alert",
+  query_id: "ID of the query to monitor",
+  options: "Alert options",
+  "options.column": "Column name to monitor",
+  "options.op": "Comparison operator",
+  "options.value": "Threshold value",
+  "options.custom_subject": "Custom email subject",
+  "options.custom_body": "Custom email body",
+  rearm: "Number of seconds to wait before triggering again",
+} satisfies JsonSchemaDescriptionMap;
+
+const toolDefinitions = [
+  defineTool("list_queries", "List all available queries in Redash", listQueriesSchema, {
+    ...paginationSchemaDescriptions,
+    q: "Search query",
+  }),
+  defineTool("get_query", "Get details of a specific query", getQuerySchema, {
+    queryId: "ID of the query to get",
+  }),
+  defineTool("create_query", "Create a new query in Redash", createQuerySchema, {
+    name: "Name of the query",
+    data_source_id: "ID of the data source to use",
+    query: "SQL query text",
+    description: "Description of the query",
+    options: "Query options",
+    schedule: "Query schedule",
+    tags: "Tags for the query",
+  }),
+  defineTool("update_query", "Update an existing query in Redash", updateQuerySchema, {
+    queryId: "ID of the query to update",
+    name: "New name of the query",
+    data_source_id: "ID of the data source to use",
+    query: "SQL query text",
+    description: "Description of the query",
+    options: "Query options",
+    schedule: "Query schedule",
+    tags: "Tags for the query",
+    is_archived: "Whether the query is archived",
+    is_draft: "Whether the query is a draft",
+  }),
+  defineTool("get_query_parameters", "Get the saved parameter definitions for a query", getQueryParametersSchema, {
+    queryId: "ID of the query",
+  }),
+  defineTool("update_query_parameters", "Update a query's saved parameter definitions", updateQueryParametersSchema, {
+    queryId: "ID of the query",
+    parameters: "Parameter definitions to merge into the query",
+    removeParameterNames: "Saved parameter names to remove from the query",
+    replaceParameters: "Replace the stored parameter list instead of merging",
+  }),
+  defineTool("archive_query", "Archive (soft-delete) a query in Redash", archiveQuerySchema, {
+    queryId: "ID of the query to archive",
+  }),
+  defineTool("list_data_sources", "List all available data sources in Redash"),
+  defineTool("execute_query", "Execute a Redash query and return results", executeQuerySchema, {
+    queryId: "ID of the query to execute",
+    parameters: "Parameters to pass to the query (if any)",
+    maxAge: "Cache age in seconds. Use 0 to force a fresh execution.",
+  }),
+  defineTool(
+    "execute_parameterized_query",
+    "Execute a saved parameterized query using its saved parameter definitions and defaults",
+    executeParameterizedQuerySchema,
+    {
+      queryId: "ID of the query to execute",
+      parameters: "Explicit parameter values to coerce using the saved Redash parameter definitions",
+      useSavedDefaults: "Apply saved default parameter values when a parameter is omitted",
+      maxAge: "Cache age in seconds. Use 0 to force a fresh execution.",
+    }
+  ),
+  defineTool(
+    "get_query_results_csv",
+    "Get query results in CSV format. Returns the last cached results, or optionally refreshes the query first to get the latest data. Note: Does not support parameterized queries.",
+    getQueryResultsCsvSchema,
+    {
+      queryId: "ID of the query to get results from",
+      refresh: "Whether to refresh the query before fetching results to ensure latest data (default: false)",
+    }
+  ),
+  defineTool("list_dashboards", "List all available dashboards in Redash", listDashboardsSchema, paginationSchemaDescriptions),
+  defineTool("get_dashboard", "Get details of a specific dashboard", getDashboardSchema, {
+    dashboardId: "ID of the dashboard to get",
+  }),
+  defineTool("get_dashboard_layout", "Get the current widget layout for a dashboard", getDashboardLayoutSchema, {
+    dashboardId: "ID of the dashboard",
+  }),
+  defineTool("get_dashboard_by_slug", "Get details of a specific dashboard by its slug", getDashboardBySlugSchema, {
+    slug: "Slug of the dashboard to get",
+  }),
+  defineTool("get_visualization", "Get details of a specific visualization", getVisualizationSchema, {
+    visualizationId: "ID of the visualization to get",
+  }),
+  defineTool(
+    "execute_adhoc_query",
+    "Execute an ad-hoc query without saving it to Redash. Creates a temporary query that is automatically deleted after execution.",
+    executeAdhocQuerySchema,
+    {
+      query: "SQL query to execute",
+      dataSourceId: "ID of the data source to query against",
+    }
+  ),
+  defineTool("create_visualization", "Create a new visualization for a query", createVisualizationSchema, {
+    query_id: "ID of the query to create visualization for",
+    type: "Type of visualization. Available types depend on your Redash instance. Use get_query to see existing visualization types in use.",
+    name: "Name of the visualization",
+    description: "Description of the visualization",
+    options: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to examine existing visualizations of the same type as a reference.",
+  }),
+  defineTool("update_visualization", "Update an existing visualization", updateVisualizationSchema, {
+    visualizationId: "ID of the visualization to update",
+    type: "Type of visualization. Available types depend on your Redash instance.",
+    name: "Name of the visualization",
+    description: "Description of the visualization",
+    options: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to see the current configuration before updating.",
+  }),
+  defineTool(
+    "update_chart_visualization",
+    "Update chart-specific visualization options and merge them with the current Redash chart config by default",
+    chartVisualizationUpdateSchema,
+    chartVisualizationSchemaDescriptions
+  ),
+  defineTool("delete_visualization", "Delete a visualization", deleteVisualizationSchema, {
+    visualizationId: "ID of the visualization to delete",
+  }),
+  defineTool("get_schema", "Get schema of a specific data source", getSchemaSchema, {
+    dataSourceId: "ID of the data source to get schema",
+  }),
+  defineTool("create_dashboard", "Create a new dashboard in Redash", createDashboardSchema, {
+    name: "Name of the dashboard",
+    tags: "Tags for the dashboard",
+  }),
+  defineTool("update_dashboard", "Update an existing dashboard in Redash", updateDashboardSchema, {
+    dashboardId: "ID of the dashboard to update",
+    name: "New name of the dashboard",
+    tags: "Tags for the dashboard",
+    is_archived: "Whether the dashboard is archived",
+    is_draft: "Whether the dashboard is a draft",
+    dashboard_filters_enabled: "Whether dashboard filters are enabled",
+  }),
+  defineTool("get_dashboard_parameters", "Get the current dashboard parameter values and widget mappings", getDashboardParametersSchema, {
+    dashboardId: "ID of the dashboard",
+  }),
+  defineTool("update_dashboard_parameters", "Update dashboard parameter values and ordering", updateDashboardParametersSchema, {
+    dashboardId: "ID of the dashboard",
+    parameters: "Dashboard parameter values to merge into the dashboard",
+    removeParameterNames: "Dashboard parameter names to remove from the dashboard",
+    replaceParameters: "Replace the stored parameter list instead of merging",
+    globalParamOrder: "Explicit display order for dashboard parameters",
+  }),
+  defineTool("archive_dashboard", "Archive (soft-delete) a dashboard in Redash", archiveDashboardSchema, {
+    dashboardId: "ID of the dashboard to archive",
+  }),
+  defineTool("fork_dashboard", "Fork (duplicate) an existing dashboard", forkDashboardSchema, {
+    dashboardId: "ID of the dashboard to fork",
+  }),
+  defineTool("get_public_dashboard", "Get a public dashboard by its share token", getPublicDashboardSchema, {
+    token: "Public share token of the dashboard",
+  }),
+  defineTool("share_dashboard", "Share a dashboard and create a public link", shareDashboardSchema, {
+    dashboardId: "ID of the dashboard to share",
+  }),
+  defineTool("unshare_dashboard", "Unshare a dashboard and revoke its public link", unshareDashboardSchema, {
+    dashboardId: "ID of the dashboard to unshare",
+  }),
+  defineTool("get_my_dashboards", "Get dashboards created by the current user", getMyDashboardsSchema, paginationSchemaDescriptions),
+  defineTool("get_favorite_dashboards", "Get dashboards marked as favorite by the current user", getFavoriteDashboardsSchema, paginationSchemaDescriptions),
+  defineTool("add_dashboard_favorite", "Add a dashboard to favorites", addDashboardFavoriteSchema, {
+    dashboardId: "ID of the dashboard to add to favorites",
+  }),
+  defineTool("remove_dashboard_favorite", "Remove a dashboard from favorites", removeDashboardFavoriteSchema, {
+    dashboardId: "ID of the dashboard to remove from favorites",
+  }),
+  defineTool("get_dashboard_tags", "Get all tags used in dashboards"),
+  defineTool("list_alerts", "List all alerts in Redash"),
+  defineTool("get_alert", "Get details of a specific alert", getAlertSchema, {
+    alertId: "ID of the alert to get",
+  }),
+  defineTool(
+    "create_alert",
+    "Create a new alert in Redash. Alerts notify you when a query result meets a specified condition.",
+    createAlertSchema,
+    createAlertSchemaDescriptions
+  ),
+  defineTool("update_alert", "Update an existing alert in Redash", updateAlertSchema, updateAlertSchemaDescriptions),
+  defineTool("delete_alert", "Delete an alert from Redash", deleteAlertSchema, {
+    alertId: "ID of the alert to delete",
+  }),
+  defineTool("mute_alert", "Mute an alert to temporarily stop notifications", muteAlertSchema, {
+    alertId: "ID of the alert to mute",
+  }),
+  defineTool("get_alert_subscriptions", "Get all subscriptions for an alert", getAlertSubscriptionsSchema, {
+    alertId: "ID of the alert",
+  }),
+  defineTool("add_alert_subscription", "Subscribe to an alert to receive notifications", addAlertSubscriptionSchema, {
+    alertId: "ID of the alert to subscribe to",
+    destination_id: "ID of the notification destination (optional, defaults to email)",
+  }),
+  defineTool("remove_alert_subscription", "Unsubscribe from an alert", removeAlertSubscriptionSchema, {
+    alertId: "ID of the alert",
+    subscriptionId: "ID of the subscription to remove",
+  }),
+  defineTool("fork_query", "Fork (duplicate) an existing query", forkQuerySchema, {
+    queryId: "ID of the query to fork",
+  }),
+  defineTool("get_my_queries", "Get queries created by the current user", getMyQueriesSchema, paginationSchemaDescriptions),
+  defineTool("get_recent_queries", "Get recently accessed queries", getRecentQueriesSchema, paginationSchemaDescriptions),
+  defineTool("get_query_tags", "Get all tags used in queries"),
+  defineTool("get_favorite_queries", "Get queries marked as favorite by the current user", getFavoriteQueriesSchema, paginationSchemaDescriptions),
+  defineTool("add_query_favorite", "Add a query to favorites", addQueryFavoriteSchema, {
+    queryId: "ID of the query to add to favorites",
+  }),
+  defineTool("remove_query_favorite", "Remove a query from favorites", removeQueryFavoriteSchema, {
+    queryId: "ID of the query to remove from favorites",
+  }),
+  defineTool("list_widgets", "List all widgets"),
+  defineTool("get_widget", "Get details of a specific widget", getWidgetSchema, {
+    widgetId: "ID of the widget to get",
+  }),
+  defineTool("create_widget", "Create a new widget on a dashboard", createWidgetSchema, {
+    dashboard_id: "ID of the dashboard to add the widget to",
+    visualization_id: "ID of the visualization to display (optional if text widget)",
+    text: "Text content for text widgets",
+    width: "Width of the widget (1-6)",
+    options: "Widget options",
+  }),
+  defineTool("update_widget", "Update an existing widget", updateWidgetSchema, {
+    widgetId: "ID of the widget to update",
+    visualization_id: "ID of the visualization to display",
+    text: "Text content for text widgets",
+    width: "Width of the widget (1-6)",
+    options: "Widget options",
+  }),
+  defineTool("update_widget_layout", "Move or resize a single widget by updating its grid position", updateWidgetLayoutSchema, {
+    widgetId: "ID of the widget",
+  }),
+  defineTool(
+    "update_dashboard_layout",
+    "Move or resize multiple widgets on a dashboard in one call and report per-widget outcomes",
+    updateDashboardLayoutSchema,
+    {
+      dashboardId: "ID of the dashboard",
+      widgets: "Widgets to move or resize",
+    }
+  ),
+  defineTool("get_widget_parameter_mappings", "Get the parameter mappings for a widget", getWidgetParameterMappingsSchema, {
+    widgetId: "ID of the widget",
+  }),
+  defineTool("update_widget_parameter_mappings", "Update a widget's parameter mappings", updateWidgetParameterMappingsSchema, {
+    widgetId: "ID of the widget",
+    parameterMappings: "Parameter mappings to merge into the widget",
+    removeParameterNames: "Widget parameter mapping names to remove",
+    replaceParameterMappings: "Replace the stored mappings instead of merging",
+  }),
+  defineTool("delete_widget", "Delete a widget from a dashboard", deleteWidgetSchema, {
+    widgetId: "ID of the widget to delete",
+  }),
+  defineTool("list_query_snippets", "List all reusable query snippets"),
+  defineTool("get_query_snippet", "Get details of a specific query snippet", getQuerySnippetSchema, {
+    snippetId: "ID of the snippet to get",
+  }),
+  defineTool("create_query_snippet", "Create a new reusable query snippet", createQuerySnippetSchema, {
+    trigger: "Trigger keyword for the snippet",
+    description: "Description of the snippet",
+    snippet: "The SQL snippet content",
+  }),
+  defineTool("update_query_snippet", "Update an existing query snippet", updateQuerySnippetSchema, {
+    snippetId: "ID of the snippet to update",
+    trigger: "Trigger keyword for the snippet",
+    description: "Description of the snippet",
+    snippet: "The SQL snippet content",
+  }),
+  defineTool("delete_query_snippet", "Delete a query snippet", deleteQuerySnippetSchema, {
+    snippetId: "ID of the snippet to delete",
+  }),
+  defineTool("list_destinations", "List all alert notification destinations (email, Slack, etc.)"),
+];
+
 // ----- Register Tools -----
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: [
-      {
-        name: "list_queries",
-        description: "List all available queries in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            page: { type: "number", description: "Page number (starts at 1)" },
-            pageSize: { type: "number", description: "Number of results per page" },
-            q: { type: "string", description: "Search query" }
-          }
-        }
-      },
-      {
-        name: "get_query",
-        description: "Get details of a specific query",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to get" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "create_query",
-        description: "Create a new query in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Name of the query" },
-            data_source_id: { type: "number", description: "ID of the data source to use" },
-            query: { type: "string", description: "SQL query text" },
-            description: { type: "string", description: "Description of the query" },
-            options: { type: "object", description: "Query options" },
-            schedule: { type: "object", description: "Query schedule" },
-            tags: { type: "array", items: { type: "string" }, description: "Tags for the query" }
-          },
-          required: ["name", "data_source_id", "query"]
-        }
-      },
-      {
-        name: "update_query",
-        description: "Update an existing query in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to update" },
-            name: { type: "string", description: "New name of the query" },
-            data_source_id: { type: "number", description: "ID of the data source to use" },
-            query: { type: "string", description: "SQL query text" },
-            description: { type: "string", description: "Description of the query" },
-            options: { type: "object", description: "Query options" },
-            schedule: { type: "object", description: "Query schedule" },
-            tags: { type: "array", items: { type: "string" }, description: "Tags for the query" },
-            is_archived: { type: "boolean", description: "Whether the query is archived" },
-            is_draft: { type: "boolean", description: "Whether the query is a draft" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "get_query_parameters",
-        description: "Get the saved parameter definitions for a query",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "update_query_parameters",
-        description: "Update a query's saved parameter definitions",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query" },
-            parameters: { type: "array", items: queryParameterJsonSchema, description: "Parameter definitions to merge into the query" },
-            removeParameterNames: { ...stringArrayJsonSchema, description: "Saved parameter names to remove from the query" },
-            replaceParameters: { type: "boolean", description: "Replace the stored parameter list instead of merging" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "archive_query",
-        description: "Archive (soft-delete) a query in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to archive" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "list_data_sources",
-        description: "List all available data sources in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "execute_query",
-        description: "Execute a Redash query and return results",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to execute" },
-            parameters: {
-              type: "object",
-              description: "Parameters to pass to the query (if any)",
-              additionalProperties: true
-            },
-            maxAge: { type: "number", description: "Cache age in seconds. Use 0 to force a fresh execution." }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "execute_parameterized_query",
-        description: "Execute a saved parameterized query using its saved parameter definitions and defaults",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to execute" },
-            parameters: {
-              type: "object",
-              description: "Explicit parameter values to coerce using the saved Redash parameter definitions",
-              additionalProperties: true
-            },
-            useSavedDefaults: { type: "boolean", description: "Apply saved default parameter values when a parameter is omitted" },
-            maxAge: { type: "number", description: "Cache age in seconds. Use 0 to force a fresh execution." }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "get_query_results_csv",
-        description: "Get query results in CSV format. Returns the last cached results, or optionally refreshes the query first to get the latest data. Note: Does not support parameterized queries.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to get results from" },
-            refresh: { type: "boolean", description: "Whether to refresh the query before fetching results to ensure latest data (default: false)" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "list_dashboards",
-        description: "List all available dashboards in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            page: { type: "number", description: "Page number (starts at 1)" },
-            pageSize: { type: "number", description: "Number of results per page" }
-          }
-        }
-      },
-      {
-        name: "get_dashboard",
-        description: "Get details of a specific dashboard",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to get" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "get_dashboard_layout",
-        description: "Get the current widget layout for a dashboard",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "get_dashboard_by_slug",
-        description: "Get details of a specific dashboard by its slug",
-        inputSchema: {
-          type: "object",
-          properties: {
-            slug: { type: "string", description: "Slug of the dashboard to get" }
-          },
-          required: ["slug"]
-        }
-      },
-      {
-        name: "get_visualization",
-        description: "Get details of a specific visualization",
-        inputSchema: {
-          type: "object",
-          properties: {
-            visualizationId: { type: "number", description: "ID of the visualization to get" }
-          },
-          required: ["visualizationId"]
-        }
-      },
-      {
-        name: "execute_adhoc_query",
-        description: "Execute an ad-hoc query without saving it to Redash. Creates a temporary query that is automatically deleted after execution.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "SQL query to execute" },
-            dataSourceId: { type: "number", description: "ID of the data source to query against" }
-          },
-          required: ["query", "dataSourceId"]
-        }
-      },
-      {
-        name: "create_visualization",
-        description: "Create a new visualization for a query",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query_id: { type: "number", description: "ID of the query to create visualization for" },
-            type: { type: "string", description: "Type of visualization. Available types depend on your Redash instance. Use get_query to see existing visualization types in use." },
-            name: { type: "string", description: "Name of the visualization" },
-            description: { type: "string", description: "Description of the visualization" },
-            options: { type: "object", description: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to examine existing visualizations of the same type as a reference." }
-          },
-          required: ["query_id", "type", "name", "options"]
-        }
-      },
-      {
-        name: "update_visualization",
-        description: "Update an existing visualization",
-        inputSchema: {
-          type: "object",
-          properties: {
-            visualizationId: { type: "number", description: "ID of the visualization to update" },
-            type: { type: "string", description: "Type of visualization. Available types depend on your Redash instance." },
-            name: { type: "string", description: "Name of the visualization" },
-            description: { type: "string", description: "Description of the visualization" },
-            options: { type: "object", description: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to see the current configuration before updating." }
-          },
-          required: ["visualizationId"]
-        }
-      },
-      {
-        name: "update_chart_visualization",
-        description: "Update chart-specific visualization options and merge them with the current Redash chart config by default",
-        inputSchema: {
-          type: "object",
-          properties: {
-            visualizationId: { type: "number", description: "ID of the visualization to update" },
-            type: { type: "string", description: "Type of visualization" },
-            name: { type: "string", description: "Name of the visualization" },
-            description: { type: "string", description: "Description of the visualization" },
-            replaceOptions: { type: "boolean", description: "Replace the entire options payload instead of merging with the current config" },
-            globalSeriesType: { type: "string", enum: ["line", "column", "area", "pie", "scatter", "bubble", "heatmap", "box", "custom"], description: "Chart type" },
-            sortX: { type: "boolean", description: "Sort the X axis" },
-            swappedAxes: { type: "boolean", description: "Swap the chart axes" },
-            sortY: { type: "boolean", description: "Sort heatmap values" },
-            reverseY: { type: "boolean", description: "Reverse heatmap order" },
-            showpoints: { type: "boolean", description: "Show all points for box charts" },
-            alignYAxesAtZero: { type: "boolean", description: "Align left and right Y axes at zero" },
-            legend: {
-              type: "object",
-              description: "Legend settings",
-              properties: {
-                enabled: { type: "boolean" },
-                placement: { type: "string", enum: ["auto", "below"] },
-                traceorder: { type: "string", enum: ["normal", "reversed"] }
-              }
-            },
-            xAxis: { type: "object", description: "X axis settings" },
-            yAxis: { type: "array", description: "Y axis settings", items: { type: "object" } },
-            error_y: { type: "object", description: "Error bar settings" },
-            series: { type: "object", description: "Series-wide chart settings" },
-            seriesOptions: { type: "object", description: "Per-series settings keyed by series name" },
-            valuesOptions: { type: "object", description: "Per-value settings" },
-            columnMapping: { type: "object", description: "Column mappings such as x, y, and series" },
-            direction: { type: "object", description: "Pie chart direction settings" },
-            sizemode: { type: "string", enum: ["area", "diameter"], description: "Bubble size mode" },
-            coefficient: { type: "number", description: "Bubble size coefficient" },
-            piesort: { type: "boolean", description: "Sort pie slices" },
-            color_scheme: { type: "string", description: "Color palette name" },
-            lineShape: { type: "string", enum: ["linear", "spline", "hv", "vh"], description: "Line interpolation" },
-            showDataLabels: { type: "boolean", description: "Toggle data labels" },
-            numberFormat: { type: "string", description: "Number format" },
-            percentFormat: { type: "string", description: "Percent format" },
-            dateTimeFormat: { type: "string", description: "Date/time format" },
-            textFormat: { type: "string", description: "Data label template" },
-            enableLink: { type: "boolean", description: "Enable click-through links" },
-            linkOpenNewTab: { type: "boolean", description: "Open click-through links in a new tab" },
-            linkFormat: { type: "string", description: "Click-through URL template" },
-            missingValuesAsZero: { type: "boolean", description: "Convert missing values to zero" },
-            chartOptions: { type: "object", description: "Raw Redash chart options to merge into the payload" }
-          },
-          required: ["visualizationId"]
-        }
-      },
-      {
-        name: "delete_visualization",
-        description: "Delete a visualization",
-        inputSchema: {
-          type: "object",
-          properties: {
-            visualizationId: { type: "number", description: "ID of the visualization to delete" }
-          },
-          required: ["visualizationId"]
-        }
-      },
-      {
-        name: "get_schema",
-        description: "Get schema of a specific data source",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dataSourceId: {
-              type: "number",
-              description: "ID of the data source to get schema",
-            },
-          },
-          required: ["dataSourceId"],
-        },
-      },
-      // Dashboard tools
-      {
-        name: "create_dashboard",
-        description: "Create a new dashboard in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Name of the dashboard" },
-            tags: { type: "array", items: { type: "string" }, description: "Tags for the dashboard" }
-          },
-          required: ["name"]
-        }
-      },
-      {
-        name: "update_dashboard",
-        description: "Update an existing dashboard in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to update" },
-            name: { type: "string", description: "New name of the dashboard" },
-            tags: { type: "array", items: { type: "string" }, description: "Tags for the dashboard" },
-            is_archived: { type: "boolean", description: "Whether the dashboard is archived" },
-            is_draft: { type: "boolean", description: "Whether the dashboard is a draft" },
-            dashboard_filters_enabled: { type: "boolean", description: "Whether dashboard filters are enabled" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "get_dashboard_parameters",
-        description: "Get the current dashboard parameter values and widget mappings",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "update_dashboard_parameters",
-        description: "Update dashboard parameter values and ordering",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard" },
-            parameters: { type: "array", items: queryParameterJsonSchema, description: "Dashboard parameter values to merge into the dashboard" },
-            removeParameterNames: { ...stringArrayJsonSchema, description: "Dashboard parameter names to remove from the dashboard" },
-            replaceParameters: { type: "boolean", description: "Replace the stored parameter list instead of merging" },
-            globalParamOrder: { ...stringArrayJsonSchema, description: "Explicit display order for dashboard parameters" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "archive_dashboard",
-        description: "Archive (soft-delete) a dashboard in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to archive" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "fork_dashboard",
-        description: "Fork (duplicate) an existing dashboard",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to fork" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "get_public_dashboard",
-        description: "Get a public dashboard by its share token",
-        inputSchema: {
-          type: "object",
-          properties: {
-            token: { type: "string", description: "Public share token of the dashboard" }
-          },
-          required: ["token"]
-        }
-      },
-      {
-        name: "share_dashboard",
-        description: "Share a dashboard and create a public link",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to share" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "unshare_dashboard",
-        description: "Unshare a dashboard and revoke its public link",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to unshare" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "get_my_dashboards",
-        description: "Get dashboards created by the current user",
-        inputSchema: {
-          type: "object",
-          properties: {
-            page: { type: "number", description: "Page number (starts at 1)" },
-            pageSize: { type: "number", description: "Number of results per page" }
-          }
-        }
-      },
-      {
-        name: "get_favorite_dashboards",
-        description: "Get dashboards marked as favorite by the current user",
-        inputSchema: {
-          type: "object",
-          properties: {
-            page: { type: "number", description: "Page number (starts at 1)" },
-            pageSize: { type: "number", description: "Number of results per page" }
-          }
-        }
-      },
-      {
-        name: "add_dashboard_favorite",
-        description: "Add a dashboard to favorites",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to add to favorites" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "remove_dashboard_favorite",
-        description: "Remove a dashboard from favorites",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard to remove from favorites" }
-          },
-          required: ["dashboardId"]
-        }
-      },
-      {
-        name: "get_dashboard_tags",
-        description: "Get all tags used in dashboards",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      // Alert tools
-      {
-        name: "list_alerts",
-        description: "List all alerts in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "get_alert",
-        description: "Get details of a specific alert",
-        inputSchema: {
-          type: "object",
-          properties: {
-            alertId: { type: "number", description: "ID of the alert to get" }
-          },
-          required: ["alertId"]
-        }
-      },
-      {
-        name: "create_alert",
-        description: "Create a new alert in Redash. Alerts notify you when a query result meets a specified condition.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Name of the alert" },
-            query_id: { type: "number", description: "ID of the query to monitor" },
-            options: {
-              type: "object",
-              description: "Alert options including column to monitor, operator (e.g., 'greater than', 'less than', 'equals'), and threshold value",
-              properties: {
-                column: { type: "string", description: "Column name to monitor" },
-                op: { type: "string", description: "Comparison operator: 'greater than', 'less than', 'equals', 'not equals', etc." },
-                value: { type: ["number", "string"], description: "Threshold value to compare against" },
-                custom_subject: { type: "string", description: "Custom email subject" },
-                custom_body: { type: "string", description: "Custom email body" }
-              },
-              required: ["column", "op", "value"]
-            },
-            rearm: { type: ["number", "null"], description: "Number of seconds to wait before triggering again (null for never)" }
-          },
-          required: ["name", "query_id", "options"]
-        }
-      },
-      {
-        name: "update_alert",
-        description: "Update an existing alert in Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            alertId: { type: "number", description: "ID of the alert to update" },
-            name: { type: "string", description: "New name of the alert" },
-            query_id: { type: "number", description: "ID of the query to monitor" },
-            options: {
-              type: "object",
-              description: "Alert options",
-              properties: {
-                column: { type: "string", description: "Column name to monitor" },
-                op: { type: "string", description: "Comparison operator" },
-                value: { type: ["number", "string"], description: "Threshold value" },
-                custom_subject: { type: "string", description: "Custom email subject" },
-                custom_body: { type: "string", description: "Custom email body" }
-              }
-            },
-            rearm: { type: ["number", "null"], description: "Number of seconds to wait before triggering again" }
-          },
-          required: ["alertId"]
-        }
-      },
-      {
-        name: "delete_alert",
-        description: "Delete an alert from Redash",
-        inputSchema: {
-          type: "object",
-          properties: {
-            alertId: { type: "number", description: "ID of the alert to delete" }
-          },
-          required: ["alertId"]
-        }
-      },
-      {
-        name: "mute_alert",
-        description: "Mute an alert to temporarily stop notifications",
-        inputSchema: {
-          type: "object",
-          properties: {
-            alertId: { type: "number", description: "ID of the alert to mute" }
-          },
-          required: ["alertId"]
-        }
-      },
-      {
-        name: "get_alert_subscriptions",
-        description: "Get all subscriptions for an alert",
-        inputSchema: {
-          type: "object",
-          properties: {
-            alertId: { type: "number", description: "ID of the alert" }
-          },
-          required: ["alertId"]
-        }
-      },
-      {
-        name: "add_alert_subscription",
-        description: "Subscribe to an alert to receive notifications",
-        inputSchema: {
-          type: "object",
-          properties: {
-            alertId: { type: "number", description: "ID of the alert to subscribe to" },
-            destination_id: { type: "number", description: "ID of the notification destination (optional, defaults to email)" }
-          },
-          required: ["alertId"]
-        }
-      },
-      {
-        name: "remove_alert_subscription",
-        description: "Unsubscribe from an alert",
-        inputSchema: {
-          type: "object",
-          properties: {
-            alertId: { type: "number", description: "ID of the alert" },
-            subscriptionId: { type: "number", description: "ID of the subscription to remove" }
-          },
-          required: ["alertId", "subscriptionId"]
-        }
-      },
-      // Additional Query tools
-      {
-        name: "fork_query",
-        description: "Fork (duplicate) an existing query",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to fork" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "get_my_queries",
-        description: "Get queries created by the current user",
-        inputSchema: {
-          type: "object",
-          properties: {
-            page: { type: "number", description: "Page number (starts at 1)" },
-            pageSize: { type: "number", description: "Number of results per page" }
-          }
-        }
-      },
-      {
-        name: "get_recent_queries",
-        description: "Get recently accessed queries",
-        inputSchema: {
-          type: "object",
-          properties: {
-            page: { type: "number", description: "Page number (starts at 1)" },
-            pageSize: { type: "number", description: "Number of results per page" }
-          }
-        }
-      },
-      {
-        name: "get_query_tags",
-        description: "Get all tags used in queries",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "get_favorite_queries",
-        description: "Get queries marked as favorite by the current user",
-        inputSchema: {
-          type: "object",
-          properties: {
-            page: { type: "number", description: "Page number (starts at 1)" },
-            pageSize: { type: "number", description: "Number of results per page" }
-          }
-        }
-      },
-      {
-        name: "add_query_favorite",
-        description: "Add a query to favorites",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to add to favorites" }
-          },
-          required: ["queryId"]
-        }
-      },
-      {
-        name: "remove_query_favorite",
-        description: "Remove a query from favorites",
-        inputSchema: {
-          type: "object",
-          properties: {
-            queryId: { type: "number", description: "ID of the query to remove from favorites" }
-          },
-          required: ["queryId"]
-        }
-      },
-      // Widget tools
-      {
-        name: "list_widgets",
-        description: "List all widgets",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "get_widget",
-        description: "Get details of a specific widget",
-        inputSchema: {
-          type: "object",
-          properties: {
-            widgetId: { type: "number", description: "ID of the widget to get" }
-          },
-          required: ["widgetId"]
-        }
-      },
-      {
-        name: "create_widget",
-        description: "Create a new widget on a dashboard",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboard_id: { type: "number", description: "ID of the dashboard to add the widget to" },
-            visualization_id: { type: "number", description: "ID of the visualization to display (optional if text widget)" },
-            text: { type: "string", description: "Text content for text widgets" },
-            width: { type: "number", description: "Width of the widget (1-6)" },
-            options: { type: "object", description: "Widget options" },
-            position: widgetPositionJsonSchema
-          },
-          required: ["dashboard_id", "width"]
-        }
-      },
-      {
-        name: "update_widget",
-        description: "Update an existing widget",
-        inputSchema: {
-          type: "object",
-          properties: {
-            widgetId: { type: "number", description: "ID of the widget to update" },
-            visualization_id: { type: "number", description: "ID of the visualization to display" },
-            text: { type: "string", description: "Text content for text widgets" },
-            width: { type: "number", description: "Width of the widget (1-6)" },
-            options: { type: "object", description: "Widget options" },
-            position: widgetPositionJsonSchema
-          },
-          required: ["widgetId"]
-        }
-      },
-      {
-        name: "update_widget_layout",
-        description: "Move or resize a single widget by updating its grid position",
-        inputSchema: {
-          type: "object",
-          properties: {
-            widgetId: { type: "number", description: "ID of the widget" },
-            position: widgetPositionJsonSchema
-          },
-          required: ["widgetId", "position"]
-        }
-      },
-      {
-        name: "update_dashboard_layout",
-        description: "Move or resize multiple widgets on a dashboard in one call and report per-widget outcomes",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dashboardId: { type: "number", description: "ID of the dashboard" },
-            widgets: { type: "array", items: widgetLayoutEntryJsonSchema, description: "Widgets to move or resize" }
-          },
-          required: ["dashboardId", "widgets"]
-        }
-      },
-      {
-        name: "get_widget_parameter_mappings",
-        description: "Get the parameter mappings for a widget",
-        inputSchema: {
-          type: "object",
-          properties: {
-            widgetId: { type: "number", description: "ID of the widget" }
-          },
-          required: ["widgetId"]
-        }
-      },
-      {
-        name: "update_widget_parameter_mappings",
-        description: "Update a widget's parameter mappings",
-        inputSchema: {
-          type: "object",
-          properties: {
-            widgetId: { type: "number", description: "ID of the widget" },
-            parameterMappings: { type: "array", items: widgetParameterMappingJsonSchema, description: "Parameter mappings to merge into the widget" },
-            removeParameterNames: { ...stringArrayJsonSchema, description: "Widget parameter mapping names to remove" },
-            replaceParameterMappings: { type: "boolean", description: "Replace the stored mappings instead of merging" }
-          },
-          required: ["widgetId"]
-        }
-      },
-      {
-        name: "delete_widget",
-        description: "Delete a widget from a dashboard",
-        inputSchema: {
-          type: "object",
-          properties: {
-            widgetId: { type: "number", description: "ID of the widget to delete" }
-          },
-          required: ["widgetId"]
-        }
-      },
-      // Query Snippet tools
-      {
-        name: "list_query_snippets",
-        description: "List all reusable query snippets",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      },
-      {
-        name: "get_query_snippet",
-        description: "Get details of a specific query snippet",
-        inputSchema: {
-          type: "object",
-          properties: {
-            snippetId: { type: "number", description: "ID of the snippet to get" }
-          },
-          required: ["snippetId"]
-        }
-      },
-      {
-        name: "create_query_snippet",
-        description: "Create a new reusable query snippet",
-        inputSchema: {
-          type: "object",
-          properties: {
-            trigger: { type: "string", description: "Trigger keyword for the snippet" },
-            description: { type: "string", description: "Description of the snippet" },
-            snippet: { type: "string", description: "The SQL snippet content" }
-          },
-          required: ["trigger", "snippet"]
-        }
-      },
-      {
-        name: "update_query_snippet",
-        description: "Update an existing query snippet",
-        inputSchema: {
-          type: "object",
-          properties: {
-            snippetId: { type: "number", description: "ID of the snippet to update" },
-            trigger: { type: "string", description: "Trigger keyword for the snippet" },
-            description: { type: "string", description: "Description of the snippet" },
-            snippet: { type: "string", description: "The SQL snippet content" }
-          },
-          required: ["snippetId"]
-        }
-      },
-      {
-        name: "delete_query_snippet",
-        description: "Delete a query snippet",
-        inputSchema: {
-          type: "object",
-          properties: {
-            snippetId: { type: "number", description: "ID of the snippet to delete" }
-          },
-          required: ["snippetId"]
-        }
-      },
-      // Destination tools
-      {
-        name: "list_destinations",
-        description: "List all alert notification destinations (email, Slack, etc.)",
-        inputSchema: {
-          type: "object",
-          properties: {}
-        }
-      }
-    ]
+    tools: toolDefinitions,
   };
 });
 
