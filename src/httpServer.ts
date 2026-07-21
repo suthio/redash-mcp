@@ -16,6 +16,7 @@ import {
 import { cors } from "hono/cors";
 import { createRedashMcpServer } from "./index.js";
 import { logger } from "./logger.js";
+import { extractApiKeyFromAuthorizationHeader, runWithRedashApiKey } from "./requestAuth.js";
 import {
   disableEmbeddedPrometheusMetrics,
   handlePrometheusMetricsRequest,
@@ -76,9 +77,19 @@ export async function startHttpServer(config: HttpServerConfig): Promise<HttpSer
     }));
   }
 
-  app.post(config.path, (context) => handler.fetch(context.req.raw, {
-    parsedBody: context.get("parsedBody"),
-  }));
+  app.post(config.path, (context) => {
+    // Each MCP HTTP request carries its own Redash personal access token in
+    // its `Authorization` header (e.g. `Authorization: Bearer <token>`).
+    // Binding it to this request's async context ensures every RedashClient
+    // call triggered while handling this request - and only this request -
+    // uses this user's token, never a shared/static one. Never log the
+    // extracted token itself.
+    const requestApiKey = extractApiKeyFromAuthorizationHeader(context.req.header("Authorization"));
+
+    return runWithRedashApiKey(requestApiKey, () => handler.fetch(context.req.raw, {
+      parsedBody: context.get("parsedBody"),
+    }));
+  });
   app.on(["GET", "DELETE"], config.path, methodNotAllowed);
 
   if (config.path === HEALTH_CHECK_PATH) {
