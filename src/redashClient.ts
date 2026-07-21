@@ -4,6 +4,7 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { logger, type LogFields } from './logger.js';
 import { isToolContentCaptureEnabled } from './telemetry.js';
 import { formatError } from './utils.js';
+import { getRequestRedashApiKey } from './requestAuth.js';
 
 dotenv.config({ quiet: true });
 
@@ -319,16 +320,28 @@ export class RedashClient {
 
   constructor() {
     this.baseUrl = process.env.REDASH_URL || '';
+    // Static fallback key, used for stdio mode (one process per user) and as a
+    // fallback in HTTP mode when a request doesn't carry its own Authorization
+    // header. NOT required at construction time: in HTTP mode every user
+    // supplies their own personal Redash API token per-request instead, see
+    // `requestAuth.ts` and the request interceptor set up below.
     this.apiKey = process.env.REDASH_API_KEY || '';
 
-    if (!this.baseUrl || !this.apiKey) {
-      throw new Error('REDASH_URL and REDASH_API_KEY must be provided in .env file');
+    if (!this.baseUrl) {
+      throw new Error('REDASH_URL must be provided in .env file');
     }
 
     const defaultHeaders: Record<string, string> = {
-      'Authorization': `Key ${this.apiKey}`,
       'Content-Type': 'application/json'
     };
+
+    // Only set a default Authorization header when a static API key is
+    // configured. If none is configured (pure per-request HTTP mode), the
+    // request interceptor below is responsible for adding it - or for
+    // rejecting the request if no key is available at all.
+    if (this.apiKey) {
+      defaultHeaders['Authorization'] = `Key ${this.apiKey}`;
+    }
 
     const extraHeaders = this.parseExtraHeaders();
 
@@ -355,6 +368,31 @@ export class RedashClient {
     }
 
     this.client = axios.create(axiosConfig);
+
+    // Per-request auth: if the current async context (set up per incoming
+    // MCP HTTP request, see httpServer.ts) carries a Redash API key that was
+    // extracted from that request's own `Authorization` header, use it for
+    // this outgoing call instead of the static `this.apiKey`. In stdio mode
+    // no per-request key is ever bound, so this always falls back to the
+    // header set above (the static REDASH_API_KEY) - no behavior change for
+    // existing stdio users.
+    this.client.interceptors.request.use((config) => {
+      const requestApiKey = getRequestRedashApiKey();
+      const apiKey = requestApiKey || this.apiKey;
+
+      if (!apiKey) {
+        throw new Error(
+          'No Redash API key available for this request. Provide it via the ' +
+          'incoming `Authorization` header (HTTP transport), or set REDASH_API_KEY ' +
+          '(stdio transport / static fallback).'
+        );
+      }
+
+      config.headers = config.headers ?? {};
+      (config.headers as Record<string, unknown>)['Authorization'] = `Key ${apiKey}`;
+
+      return config;
+    });
   }
 
   // Parse extra headers from env var `REDASH_EXTRA_HEADERS`.

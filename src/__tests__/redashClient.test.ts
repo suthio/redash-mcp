@@ -4,8 +4,27 @@ import { jest } from '@jest/globals';
 import { logger } from '../logger.js';
 import { isToolContentCaptureEnabled } from '../telemetry.js';
 
-// Mock axios
-jest.mock('axios');
+// Mock axios. Provide a default stub instance (including `interceptors`) so
+// that the module-level `redashClient` singleton in `../redashClient.js` -
+// which is constructed as a side effect of the very `import` above, before
+// any `beforeEach` runs - doesn't blow up on `this.client.interceptors...`.
+jest.mock('axios', () => {
+  const defaultInstance = {
+    get: jest.fn(),
+    post: jest.fn(),
+    delete: jest.fn(),
+    defaults: { headers: {} },
+    interceptors: { request: { use: jest.fn() } },
+  };
+
+  return {
+    __esModule: true,
+    default: {
+      create: jest.fn(() => defaultInstance),
+      isAxiosError: jest.fn(),
+    },
+  };
+});
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 // Mock logger
@@ -44,6 +63,11 @@ describe('RedashClient', () => {
       defaults: {
         headers: {},
       },
+      interceptors: {
+        request: {
+          use: jest.fn(),
+        },
+      },
     };
 
     mockedAxios.create.mockReturnValue(mockAxiosInstance as any);
@@ -59,15 +83,23 @@ describe('RedashClient', () => {
     it('should throw error if REDASH_URL is not set', () => {
       delete process.env.REDASH_URL;
       expect(() => new RedashClient()).toThrow(
-        'REDASH_URL and REDASH_API_KEY must be provided in .env file'
+        'REDASH_URL must be provided in .env file'
       );
     });
 
-    it('should throw error if REDASH_API_KEY is not set', () => {
+    it('should NOT throw if REDASH_API_KEY is not set (per-request tokens are supported in HTTP mode)', () => {
       delete process.env.REDASH_API_KEY;
-      expect(() => new RedashClient()).toThrow(
-        'REDASH_URL and REDASH_API_KEY must be provided in .env file'
-      );
+      expect(() => new RedashClient()).not.toThrow();
+    });
+
+    it('should not set a default Authorization header if REDASH_API_KEY is not set', () => {
+      delete process.env.REDASH_API_KEY;
+      mockedAxios.create.mockClear();
+
+      new RedashClient();
+
+      const callArgs = mockedAxios.create.mock.calls[0]?.[0];
+      expect((callArgs?.headers as any)?.Authorization).toBeUndefined();
     });
 
     it('should create axios instance with correct config', () => {
@@ -79,6 +111,10 @@ describe('RedashClient', () => {
         },
         timeout: 30000,
       });
+    });
+
+    it('should register a request interceptor for per-request auth', () => {
+      expect(mockAxiosInstance.interceptors.request.use).toHaveBeenCalledTimes(1);
     });
 
     it('should parse JSON extra headers', () => {
@@ -122,6 +158,48 @@ describe('RedashClient', () => {
       const callArgs = mockedAxios.create.mock.calls[0]?.[0];
       expect(callArgs?.headers).toBeDefined();
       expect((callArgs?.headers as any)?.Authorization).toBe('Key test-api-key');
+    });
+  });
+
+  describe('per-request auth (HTTP transport)', () => {
+    function getInterceptor(): (config: any) => any {
+      // Use the most recently registered interceptor, in case a test
+      // constructs an additional RedashClient instance against the same
+      // mocked axios instance.
+      const calls = mockAxiosInstance.interceptors.request.use.mock.calls;
+      const call = calls[calls.length - 1];
+      return call[0];
+    }
+
+    it('uses the request-scoped API key over the static REDASH_API_KEY', async () => {
+      const { runWithRedashApiKey } = await import('../requestAuth.js');
+      const interceptor = getInterceptor();
+
+      const config = runWithRedashApiKey('user-token-from-header', () =>
+        interceptor({ headers: {} })
+      );
+
+      expect(config.headers.Authorization).toBe('Key user-token-from-header');
+    });
+
+    it('falls back to the static REDASH_API_KEY when no request-scoped key is bound (stdio mode)', () => {
+      const interceptor = getInterceptor();
+
+      const config = interceptor({ headers: {} });
+
+      expect(config.headers.Authorization).toBe('Key test-api-key');
+    });
+
+    it('throws a clear error if neither a request-scoped key nor REDASH_API_KEY is available', async () => {
+      delete process.env.REDASH_API_KEY;
+      mockedAxios.create.mockClear();
+      client = new RedashClient();
+
+      const interceptor = getInterceptor();
+
+      expect(() => interceptor({ headers: {} })).toThrow(
+        /No Redash API key available for this request/
+      );
     });
   });
 

@@ -11,8 +11,27 @@ import { toolDefinitions } from '../index.js';
 import { logger } from '../logger.js';
 import { jest } from '@jest/globals';
 
-// Mock axios to avoid real API calls
-jest.mock('axios');
+// Mock axios to avoid real API calls. Provide a default stub instance
+// (including `interceptors`) so the module-level `redashClient` singleton -
+// constructed as a side effect of the `import` above, before any test body
+// runs - doesn't blow up on `this.client.interceptors...`.
+jest.mock('axios', () => {
+  const defaultInstance = {
+    get: jest.fn(),
+    post: jest.fn(),
+    delete: jest.fn(),
+    defaults: { headers: {} },
+    interceptors: { request: { use: jest.fn() } },
+  };
+
+  return {
+    __esModule: true,
+    default: {
+      create: jest.fn(() => defaultInstance),
+      isAxiosError: jest.fn(),
+    },
+  };
+});
 
 function getToolInputSchema(name: string) {
   const tool = toolDefinitions.find((definition) => definition.name === name);

@@ -20,11 +20,72 @@ const LOOPBACK_HOSTNAMES = [...LOOPBACK_ALLOWED_HOSTNAMES];
 
 const openHandles: HttpServerHandle[] = [];
 
+// Captures the `Authorization` header actually sent to the (mocked) Redash
+// API for every outgoing call, so tests can assert that each incoming MCP
+// HTTP request's own Authorization header is forwarded 1:1 to Redash -
+// instead of a shared/static REDASH_API_KEY - without hitting a real Redash
+// instance or using real credentials.
+const capturedRedashAuthHeaders: Array<string | undefined> = [];
+
+jest.mock("axios", () => {
+  // Emulates just enough of axios's request-interceptor behavior for the
+  // test below: every `get`/`post`/`delete` call is routed through whatever
+  // interceptor RedashClient registered, and we record the Authorization
+  // header the interceptor produced before "sending" the (fake) request.
+  let interceptor: ((config: any) => any) | undefined;
+
+  const rawGet = async (_url: string, config: any) => {
+    capturedRedashAuthHeaders.push(config?.headers?.Authorization);
+    return { data: { count: 0, page: 1, page_size: 25, results: [] } };
+  };
+  const rawPost = async (_url: string, _body?: any, config?: any) => {
+    capturedRedashAuthHeaders.push(config?.headers?.Authorization);
+    return { data: {} };
+  };
+  const rawDelete = async (_url: string, config?: any) => {
+    capturedRedashAuthHeaders.push(config?.headers?.Authorization);
+    return { data: {} };
+  };
+
+  const instance = {
+    get: jest.fn(async (url: string, config?: any) =>
+      rawGet(url, interceptor ? interceptor({ headers: {}, ...config }) : config)
+    ),
+    post: jest.fn(async (url: string, body?: any, config?: any) =>
+      rawPost(url, body, interceptor ? interceptor({ headers: {}, ...config }) : config)
+    ),
+    delete: jest.fn(async (url: string, config?: any) =>
+      rawDelete(url, interceptor ? interceptor({ headers: {}, ...config }) : config)
+    ),
+    defaults: { headers: {} as Record<string, string> },
+    interceptors: {
+      request: {
+        use: (fn: (config: any) => any) => {
+          interceptor = fn;
+        },
+      },
+    },
+  };
+
+  return {
+    __esModule: true,
+    default: {
+      create: jest.fn(() => instance),
+      isAxiosError: jest.fn(() => false),
+    },
+  };
+});
+
+beforeEach(() => {
+  capturedRedashAuthHeaders.length = 0;
+});
+
 describe("HTTP MCP server", () => {
   let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
 
   beforeEach(() => {
     consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    capturedRedashAuthHeaders.length = 0;
   });
 
   afterEach(async () => {
@@ -321,6 +382,50 @@ describe("HTTP MCP server", () => {
       expect(serverInfo.handle.server.listening).toBe(false);
     } finally {
       await client.close();
+    }
+  });
+
+  it("forwards each request's own Authorization header to Redash, per-request", async () => {
+    const serverInfo = await startTestServer();
+    const url = new URL(`${serverInfo.baseUrl}/mcp`);
+
+    // Simulate two different users, each with their own personal Redash
+    // token, calling the same shared HTTP MCP process.
+    const userATransport = new StreamableHTTPClientTransport(url, {
+      requestInit: { headers: { Authorization: "Bearer user-a-token" } },
+    });
+    const userAClient = new Client({ name: "user-a-client", version: "1.0.0" });
+
+    const userBTransport = new StreamableHTTPClientTransport(url, {
+      requestInit: { headers: { Authorization: "Bearer user-b-token" } },
+    });
+    const userBClient = new Client({ name: "user-b-client", version: "1.0.0" });
+
+    // A third "client" that sends no Authorization header at all, to verify
+    // the static REDASH_API_KEY fallback still works (no breaking change
+    // for stdio-style / header-less usage).
+    const noAuthTransport = new StreamableHTTPClientTransport(url);
+    const noAuthClient = new Client({ name: "no-auth-client", version: "1.0.0" });
+
+    try {
+      await userAClient.connect(userATransport);
+      await userAClient.callTool({ name: "list_queries", arguments: {} });
+
+      await userBClient.connect(userBTransport);
+      await userBClient.callTool({ name: "list_queries", arguments: {} });
+
+      await noAuthClient.connect(noAuthTransport);
+      await noAuthClient.callTool({ name: "list_queries", arguments: {} });
+
+      expect(capturedRedashAuthHeaders).toEqual([
+        "Key user-a-token",
+        "Key user-b-token",
+        "Key test-api-key",
+      ]);
+    } finally {
+      await userAClient.close();
+      await userBClient.close();
+      await noAuthClient.close();
     }
   });
 });
