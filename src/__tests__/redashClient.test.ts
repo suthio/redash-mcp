@@ -38,8 +38,14 @@ describe('RedashClient', () => {
       get: jest.fn(),
       post: jest.fn(),
       delete: jest.fn(),
+      request: jest.fn(),
       defaults: {
         headers: {},
+      },
+      interceptors: {
+        response: {
+          use: jest.fn(),
+        },
       },
     };
 
@@ -75,6 +81,7 @@ describe('RedashClient', () => {
           'Content-Type': 'application/json',
         },
         timeout: 30000,
+        maxRedirects: 0,
       });
     });
 
@@ -119,6 +126,98 @@ describe('RedashClient', () => {
       const callArgs = mockedAxios.create.mock.calls[0]?.[0];
       expect(callArgs?.headers).toBeDefined();
       expect((callArgs?.headers as any)?.Authorization).toBe('Key test-api-key');
+    });
+  });
+
+  describe('redirect handling', () => {
+    const getRedirectHandler = (): ((error: any) => Promise<any>) => {
+      const useCall = mockAxiosInstance.interceptors.response.use.mock.calls[0];
+      return useCall[1];
+    };
+
+    beforeEach(() => {
+      process.env.REDASH_URL = 'http://redash.example.com';
+      mockedAxios.create.mockClear();
+      mockAxiosInstance.interceptors.response.use.mockClear();
+      client = new RedashClient();
+    });
+
+    it('should register a response interceptor', () => {
+      expect(mockAxiosInstance.interceptors.response.use).toHaveBeenCalledWith(
+        undefined,
+        expect.any(Function)
+      );
+    });
+
+    it('should upgrade the base URL and retry on a same-host http to https redirect', async () => {
+      const handler = getRedirectHandler();
+      mockAxiosInstance.request.mockResolvedValue({ data: 'ok' });
+
+      const error = {
+        response: {
+          status: 301,
+          headers: { location: 'https://redash.example.com/' },
+        },
+        config: { url: '/api/queries', method: 'post', data: { a: 1 } },
+      };
+
+      const result = await handler(error);
+
+      expect(result).toEqual({ data: 'ok' });
+      expect(mockAxiosInstance.defaults.baseURL).toBe('https://redash.example.com');
+      expect(mockAxiosInstance.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: '/api/queries',
+          method: 'post',
+          data: { a: 1 },
+          baseURL: 'https://redash.example.com',
+          __redirectRetried: true,
+        })
+      );
+    });
+
+    it('should not retry a request that was already retried', async () => {
+      const handler = getRedirectHandler();
+
+      const error = {
+        response: {
+          status: 301,
+          headers: { location: 'https://redash.example.com/' },
+        },
+        config: { url: '/api/queries', __redirectRetried: true },
+      };
+
+      await expect(handler(error)).rejects.toBe(error);
+      expect(mockAxiosInstance.request).not.toHaveBeenCalled();
+    });
+
+    it('should reject with a clear error on a cross-host redirect', async () => {
+      const handler = getRedirectHandler();
+
+      const error = {
+        response: {
+          status: 302,
+          headers: { location: 'https://other.example.com/' },
+        },
+        config: { url: '/api/queries' },
+      };
+
+      await expect(handler(error)).rejects.toThrow(
+        /redirect \(302\).*Update REDASH_URL/
+      );
+      expect(mockAxiosInstance.request).not.toHaveBeenCalled();
+    });
+
+    it('should pass through non-redirect errors unchanged', async () => {
+      const handler = getRedirectHandler();
+
+      const error = {
+        response: { status: 500, headers: {} },
+        config: { url: '/api/queries' },
+      };
+
+      await expect(handler(error)).rejects.toBe(error);
+      expect(mockAxiosInstance.request).not.toHaveBeenCalled();
     });
   });
 

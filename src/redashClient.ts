@@ -292,7 +292,8 @@ export class RedashClient {
         ...defaultHeaders,
         ...extraHeaders,
       },
-      timeout: parseInt(process.env.REDASH_TIMEOUT || '30000')
+      timeout: parseInt(process.env.REDASH_TIMEOUT || '30000'),
+      maxRedirects: 0
     };
 
     const socksProxy = process.env.REDASH_SOCKS_PROXY;
@@ -303,6 +304,46 @@ export class RedashClient {
     }
 
     this.client = axios.create(axiosConfig);
+    this.client?.interceptors?.response.use(
+      undefined,
+      (error) => this.handleRedirectError(error)
+    );
+  }
+
+  // Handle redirect responses ourselves (maxRedirects is 0). Letting axios
+  // follow a cross-protocol redirect strips the Authorization header
+  // (follow-redirects >= 1.15.6) and turns a 301'd POST into a GET, so an
+  // http:// REDASH_URL behind an https-redirecting proxy silently breaks.
+  // Instead, upgrade a same-host http -> https base URL once and retry the
+  // request intact.
+  private handleRedirectError(error: any): Promise<any> {
+    const status = error?.response?.status;
+    const location = error?.response?.headers?.location;
+    const config = error?.config;
+
+    if (!config || config.__redirectRetried || !location || ![301, 302, 307, 308].includes(status)) {
+      return Promise.reject(error);
+    }
+
+    let base: URL;
+    let target: URL;
+    try {
+      base = new URL(this.baseUrl);
+      target = new URL(location, this.baseUrl);
+    } catch {
+      return Promise.reject(error);
+    }
+
+    if (base.protocol === 'http:' && target.protocol === 'https:' && target.hostname === base.hostname) {
+      base.protocol = 'https:';
+      const upgraded = base.toString().replace(/\/+$/, '');
+      logger.warning(`REDASH_URL uses http:// but the server redirects to https://; retrying against ${upgraded}. Update REDASH_URL to https:// to avoid the extra round-trip.`);
+      this.baseUrl = upgraded;
+      this.client.defaults.baseURL = upgraded;
+      return this.client.request({ ...config, baseURL: upgraded, __redirectRetried: true });
+    }
+
+    return Promise.reject(new Error(`Redash responded with a redirect (${status}) to ${target.toString()}. Update REDASH_URL to point at the final address.`));
   }
 
   // Parse extra headers from env var `REDASH_EXTRA_HEADERS`.
