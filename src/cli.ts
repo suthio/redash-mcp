@@ -8,7 +8,7 @@ import * as path from 'path';
 // Check if .env file exists in current directory and load it
 const envPath = path.join(process.cwd(), '.env');
 if (existsSync(envPath)) {
-  dotenv.config({ path: envPath });
+  dotenv.config({ path: envPath, quiet: true });
 }
 
 // Check required environment variables

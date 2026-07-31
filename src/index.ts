@@ -20,7 +20,7 @@ import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout,
 import { logger, LogLevel } from "./logger.js";
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // Create MCP server instance
 const server = new Server(
