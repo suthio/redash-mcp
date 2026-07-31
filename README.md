@@ -11,9 +11,13 @@ Model Context Protocol (MCP) server for integrating Redash with AI assistants li
 - Connect to Redash instances via the Redash API
 - List available queries and dashboards as resources
 - Execute queries and retrieve results
+- Execute saved parameterized queries with typed values and saved defaults
 - Create and manage queries (create, update, archive)
+- Manage query parameters, dashboard parameters, and widget parameter mappings
+- Inspect and update dashboard widget layouts and grid positions
 - List data sources for query creation
 - Get dashboard details and visualizations
+- Update chart visualization options with Redash chart-specific settings
 
 ## Prerequisites
 
@@ -116,22 +120,33 @@ Add the following configuration (edit paths as needed):
 - `get-query`: Get details of a specific query 
 - `create-query`: Create a new query in Redash
 - `update-query`: Update an existing query in Redash
+- `get-query-parameters`: Inspect saved query parameter definitions
+- `update-query-parameters`: Update saved query parameter definitions
 - `archive-query`: Archive (soft-delete) a query
 - `list-data-sources`: List all available data sources
 
 ### Query Execution
-- `execute-query`: Execute a query and return results
+- `execute-query`: Execute a query and return results, with optional `maxAge`
+- `execute-parameterized-query`: Execute a saved parameterized query with type-aware value coercion, saved defaults, and optional `maxAge`
 - `execute-adhoc-query`: Execute an ad-hoc query without saving it to Redash
 - `get-query-results-csv`: Get query results in CSV format (supports optional refresh for latest data)
 
 ### Dashboard Management
 - `list-dashboards`: List all available dashboards
 - `get-dashboard`: Get dashboard details and visualizations 
+- `get-dashboard-layout`: Inspect widget positions, sizes, and visibility on a dashboard
 - `get-visualization`: Get details of a specific visualization
+- `get-dashboard-parameters`: Inspect dashboard parameter values and widget mappings
+- `update-dashboard-parameters`: Update dashboard parameter values and order
+- `update-dashboard-layout`: Move or resize multiple widgets in one call
+- `update-widget-layout`: Move or resize a single widget
+- `get-widget-parameter-mappings`: Inspect a widget's parameter mappings
+- `update-widget-parameter-mappings`: Update a widget's parameter mappings
 
 ### Visualization Management
 - `create-visualization`: Create a new visualization for a query
 - `update-visualization`: Update an existing visualization
+- `update-chart-visualization`: Patch chart-specific options like `globalSeriesType`, `columnMapping`, `seriesOptions`, `legend`, and axis settings
 - `delete-visualization`: Delete a visualization
 
 ## Development
