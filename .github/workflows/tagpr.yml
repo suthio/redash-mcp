@@ -39,9 +39,3 @@ jobs:
       - name: Test
         if: steps.tagpr.outputs.tag != ''
         run: npm test
-
-      - name: Publish to npm
-        if: steps.tagpr.outputs.tag != ''
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
