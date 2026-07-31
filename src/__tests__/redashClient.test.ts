@@ -416,9 +416,33 @@ describe('RedashClient', () => {
           query: 'SELECT COUNT(*) as count FROM users',
           data_source_id: 1,
           max_age: 0,
+          apply_auto_limit: true,
         })
       );
       expect(result).toEqual(mockResult);
+    });
+
+    it('should allow automatic limits to be disabled', async () => {
+      const mockResult = {
+        id: 1,
+        data: {
+          columns: [],
+          rows: [],
+        },
+      };
+
+      mockAxiosInstance.post.mockResolvedValue({ data: mockResult });
+
+      await client.executeAdhocQuery('SELECT TOP 10 * FROM users', 2, false);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+        '/api/query_results',
+        expect.objectContaining({
+          query: 'SELECT TOP 10 * FROM users',
+          data_source_id: 2,
+          apply_auto_limit: false,
+        })
+      );
     });
   });
 

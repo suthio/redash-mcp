@@ -680,13 +680,14 @@ async function getVisualization(params: z.infer<typeof getVisualizationSchema>) 
 // Tool: execute_adhoc_query
 const executeAdhocQuerySchema = z.object({
   query: z.string(),
-  dataSourceId: z.coerce.number()
+  dataSourceId: z.coerce.number(),
+  applyAutoLimit: z.boolean().optional().default(true)
 });
 
 async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>) {
   try {
-    const { query, dataSourceId } = params;
-    const result = await redashClient.executeAdhocQuery(query, dataSourceId);
+    const { query, dataSourceId, applyAutoLimit } = params;
+    const result = await redashClient.executeAdhocQuery(query, dataSourceId, applyAutoLimit);
 
     return {
       content: [
@@ -2289,6 +2290,7 @@ const toolDefinitions = [
     {
       query: "SQL query to execute",
       dataSourceId: "ID of the data source to query against",
+      applyAutoLimit: "Whether Redash should apply an automatic LIMIT. Set to false for MSSQL data sources, where LIMIT is invalid T-SQL.",
     }
   ),
   defineTool("create_visualization", "Create a new visualization for a query", createVisualizationSchema, {
