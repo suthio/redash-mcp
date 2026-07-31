@@ -3,7 +3,7 @@ import * as dotenv from 'dotenv';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { logger } from './logger.js';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // Redash API types
 export interface RedashQuery {
