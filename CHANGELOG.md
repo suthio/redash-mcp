@@ -1,6 +1,6 @@
 # Changelog
 
-## [v0.0.14](https://github.com/suthio/redash-mcp/compare/v0.0.13...v0.0.14) - 2026-05-21
+## [v0.0.14](https://github.com/suthio/redash-mcp/compare/v0.0.13...v0.0.14) - 2026-07-31
 - Add tools for query parameters, widget layout, and chart config by @noaahh in https://github.com/suthio/redash-mcp/pull/57
 
 ## [v0.0.13](https://github.com/suthio/redash-mcp/compare/v0.0.12...v0.0.13) - 2026-03-26
