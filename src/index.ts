@@ -67,6 +67,17 @@ async function getQuery(params: z.infer<typeof getQuerySchema>) {
   }
 }
 
+// Schedule schema with day_of_week defaulting to null
+// day_of_week uses full English names: "Monday", "Tuesday", etc.
+// interval is in seconds (e.g., 86400 = daily, 604800 = weekly)
+const scheduleSchema = z.object({
+  interval: z.number().nullable(),
+  time: z.string().nullable().optional(),
+  until: z.string().nullable().optional(),
+  day_of_week: z.string().nullable().default(null),
+  disabled: z.boolean().optional(),
+}).optional().nullable();
+
 // Tool: create_query
 const createQuerySchema = z.object({
   name: z.string(),
@@ -74,7 +85,7 @@ const createQuerySchema = z.object({
   query: z.string(),
   description: z.string().optional(),
   options: z.any().optional(),
-  schedule: z.any().optional(),
+  schedule: scheduleSchema,
   tags: z.array(z.string()).optional()
 });
 
@@ -127,7 +138,7 @@ const updateQuerySchema = z.object({
   query: z.string().optional(),
   description: z.string().optional(),
   options: z.any().optional(),
-  schedule: z.any().optional(),
+  schedule: scheduleSchema,
   tags: z.array(z.string()).optional(),
   is_archived: z.boolean().optional(),
   is_draft: z.boolean().optional()

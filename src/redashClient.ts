@@ -21,6 +21,17 @@ export interface RedashQuery {
   visualizations: RedashVisualization[];
 }
 
+// Schedule interface for Redash queries
+// day_of_week uses full English names: "Monday", "Tuesday", etc.
+// interval is in seconds (e.g., 86400 = daily, 604800 = weekly)
+export interface QuerySchedule {
+  interval: number | null;
+  time?: string | null;
+  until?: string | null;
+  day_of_week: string | null;
+  disabled?: boolean;
+}
+
 // New interfaces for query creation and update
 export interface CreateQueryRequest {
   name: string;
@@ -28,7 +39,7 @@ export interface CreateQueryRequest {
   query: string;
   description?: string;
   options?: any;
-  schedule?: any;
+  schedule?: QuerySchedule | null;
   tags?: string[];
 }
 
@@ -38,7 +49,7 @@ export interface UpdateQueryRequest {
   query?: string;
   description?: string;
   options?: any;
-  schedule?: any;
+  schedule?: QuerySchedule | null;
   tags?: string[];
   is_archived?: boolean;
   is_draft?: boolean;
