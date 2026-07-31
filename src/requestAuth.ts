@@ -40,7 +40,13 @@ export function getRequestRedashApiKey(): string | undefined {
  * Accepted formats:
  *   - `Bearer <token>`  (common convention used by many MCP/HTTP clients)
  *   - `Key <token>`     (Redash's own scheme, in case a client mirrors it)
- *   - `<token>`         (raw token, no scheme prefix)
+ *   - `<token>`         (raw token, no scheme prefix, no internal whitespace)
+ *
+ * Any other scheme (e.g. `Basic ...`, `Digest ...`) - or any value that
+ * contains whitespace but isn't a recognized `Bearer`/`Key` prefix - is
+ * rejected (returns `undefined`) rather than being silently treated as a raw
+ * token. This keeps the boundary between "Redash API key" and "some other
+ * kind of credential" explicit.
  *
  * The returned token is the raw Redash personal access token/API key. It is
  * the caller's responsibility to prefix it with `Key ` again before sending
@@ -62,7 +68,24 @@ export function extractApiKeyFromAuthorizationHeader(
   }
 
   const schemeMatch = trimmed.match(/^(Bearer|Key)\s+(.+)$/i);
-  const token = schemeMatch ? schemeMatch[2].trim() : trimmed;
+  if (schemeMatch) {
+    const token = schemeMatch[2].trim();
+    return token || undefined;
+  }
 
-  return token || undefined;
+  // A bare `Bearer` or `Key` with no token after it is a malformed scheme
+  // usage, not a valid raw token - reject it rather than treating the
+  // literal word as the API key.
+  if (/^(Bearer|Key)$/i.test(trimmed)) {
+    return undefined;
+  }
+
+  // No recognized scheme prefix. Only accept this as a raw token if it has
+  // no internal whitespace - anything with whitespace (e.g. `Basic <blob>`)
+  // is an unsupported/unrecognized scheme and must be rejected outright.
+  if (/\s/.test(trimmed)) {
+    return undefined;
+  }
+
+  return trimmed;
 }
