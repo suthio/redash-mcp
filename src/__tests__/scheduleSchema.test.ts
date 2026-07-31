@@ -1,4 +1,4 @@
-import { scheduleSchema } from '../index.js';
+import { scheduleSchema } from '../schedule.js';
 
 describe('scheduleSchema', () => {
   it('should default day_of_week to null when omitted', () => {
