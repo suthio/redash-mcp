@@ -1,7 +1,15 @@
 {
   "name": "@suthio/redash-mcp",
-  "version": "0.0.12",
+  "version": "0.0.14",
   "description": "MCP server for Redash integration",
+  "homepage": "https://github.com/suthio/redash-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suthio/redash-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/suthio/redash-mcp/issues"
+  },
   "type": "module",
   "bin": {
     "redash-mcp": "./dist/cli.js"

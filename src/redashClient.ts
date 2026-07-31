@@ -88,6 +88,7 @@ export interface RedashDashboard {
   name: string;
   slug: string;
   tags: string[];
+  options?: any;
   is_archived: boolean;
   is_draft: boolean;
   created_at: string;
@@ -96,6 +97,7 @@ export interface RedashDashboard {
   dashboard_filters_enabled: boolean;
   widgets: Array<{
     id: number;
+    visualization_id?: number;
     visualization?: {
       id: number;
       type: string;
@@ -133,6 +135,7 @@ export interface UpdateDashboardRequest {
   is_archived?: boolean;
   is_draft?: boolean;
   dashboard_filters_enabled?: boolean;
+  options?: any;
 }
 
 // Alert interfaces
@@ -395,7 +398,7 @@ export class RedashClient {
         logger.error(`Request config: ${JSON.stringify({
           url: axiosError.config?.url,
           method: axiosError.config?.method,
-          
+
           data: axiosError.config?.data
         }, null, 2)}`);
 
@@ -444,7 +447,7 @@ export class RedashClient {
         logger.error(`Request config: ${JSON.stringify({
           url: axiosError.config?.url,
           method: axiosError.config?.method,
-          
+
           data: axiosError.config?.data
         }, null, 2)}`);
 
@@ -487,9 +490,9 @@ export class RedashClient {
   }
 
   // Execute a query and return results
-  async executeQuery(queryId: number, parameters?: Record<string, any>): Promise<RedashQueryResult> {
+  async executeQuery(queryId: number, parameters?: Record<string, any>, maxAge?: number): Promise<RedashQueryResult> {
     try {
-      const response = await this.client.post(`/api/queries/${queryId}/results`, { parameters });
+      const response = await this.client.post(`/api/queries/${queryId}/results`, { parameters, max_age: maxAge });
 
       if (response.data.job) {
         // Query is being executed asynchronously, poll for results
@@ -606,6 +609,19 @@ export class RedashClient {
     } catch (error) {
       console.error(`Error fetching dashboard ${dashboardId}:`, error);
       throw new Error(`Failed to fetch dashboard ${dashboardId} from Redash`);
+    }
+  }
+
+  // Get a specific dashboard by slug
+  async getDashboardBySlug(slug: string): Promise<RedashDashboard> {
+    try {
+      const response = await this.client.get(`/api/dashboards/${slug}`, {
+        params: { legacy: null }
+      });
+      return response.data;
+    } catch (error) {
+      logger.error(`Error fetching dashboard by slug '${slug}': ${error}`);
+      throw new Error(`Failed to fetch dashboard by slug '${slug}' from Redash`);
     }
   }
 

@@ -336,7 +336,7 @@ describe('RedashClient', () => {
 
       expect(mockAxiosInstance.post).toHaveBeenCalledWith(
         '/api/queries/123/results',
-        { parameters: undefined }
+        { parameters: undefined, max_age: undefined }
       );
       expect(result).toEqual(mockResult);
     });
@@ -349,7 +349,18 @@ describe('RedashClient', () => {
 
       expect(mockAxiosInstance.post).toHaveBeenCalledWith(
         '/api/queries/123/results',
-        { parameters: params }
+        { parameters: params, max_age: undefined }
+      );
+    });
+
+    it('should execute a query with max age override', async () => {
+      mockAxiosInstance.post.mockResolvedValue({ data: {} });
+
+      await client.executeQuery(123, { category: 'example-value' }, 0);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+        '/api/queries/123/results',
+        { parameters: { category: 'example-value' }, max_age: 0 }
       );
     });
 
@@ -405,9 +416,33 @@ describe('RedashClient', () => {
           query: 'SELECT COUNT(*) as count FROM users',
           data_source_id: 1,
           max_age: 0,
+          apply_auto_limit: true,
         })
       );
       expect(result).toEqual(mockResult);
+    });
+
+    it('should allow automatic limits to be disabled', async () => {
+      const mockResult = {
+        id: 1,
+        data: {
+          columns: [],
+          rows: [],
+        },
+      };
+
+      mockAxiosInstance.post.mockResolvedValue({ data: mockResult });
+
+      await client.executeAdhocQuery('SELECT TOP 10 * FROM users', 2, false);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith(
+        '/api/query_results',
+        expect.objectContaining({
+          query: 'SELECT TOP 10 * FROM users',
+          data_source_id: 2,
+          apply_auto_limit: false,
+        })
+      );
     });
   });
 
@@ -471,6 +506,34 @@ describe('RedashClient', () => {
 
       expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/1');
       expect(result).toEqual(mockDashboard);
+    });
+  });
+
+  describe('getDashboardBySlug', () => {
+    it('should fetch a dashboard by slug with legacy parameter', async () => {
+      const mockDashboard = {
+        id: 1,
+        name: 'Test Dashboard',
+        slug: 'test-dashboard',
+        widgets: [],
+      };
+
+      mockAxiosInstance.get.mockResolvedValue({ data: mockDashboard });
+
+      const result = await client.getDashboardBySlug('test-dashboard');
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/test-dashboard', {
+        params: { legacy: null }
+      });
+      expect(result).toEqual(mockDashboard);
+    });
+
+    it('should throw error on failure', async () => {
+      mockAxiosInstance.get.mockRejectedValue(new Error('Not found'));
+
+      await expect(client.getDashboardBySlug('non-existent-slug')).rejects.toThrow(
+        "Failed to fetch dashboard by slug 'non-existent-slug' from Redash"
+      );
     });
   });
 
