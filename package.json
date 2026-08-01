@@ -12,7 +12,7 @@
   },
   "type": "module",
   "bin": {
-    "redash-mcp": "./dist/cli.js"
+    "redash-mcp": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "files": [
