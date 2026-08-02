@@ -16,6 +16,8 @@ import { buildParameterizedExecutionParameters, ParameterizedExecutionError } fr
 import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
 import { logger } from "./logger.js";
+import { TelemetryMcpServer, type McpTelemetryOptions } from "./mcpTelemetry.js";
+import { PACKAGE_VERSION } from "./packageInfo.js";
 
 // Load environment variables
 dotenv.config({ quiet: true });
@@ -2249,11 +2251,17 @@ const redashResourceTemplate = new ResourceTemplate("redash://{type}/{id}", {
   list: listRedashResources,
 });
 
-export function createRedashMcpServer(): McpServer {
-  const server = new McpServer({
-    name: "redash-mcp",
-    version: "1.1.0",
-  });
+export function createRedashMcpServer(
+  telemetryOptions: McpTelemetryOptions = { networkTransport: "pipe" },
+): McpServer {
+  const server = new TelemetryMcpServer(
+    {
+      name: "redash-mcp",
+      version: PACKAGE_VERSION,
+    },
+    undefined,
+    telemetryOptions,
+  );
 
   for (const tool of toolDefinitions) {
     server.registerTool(
@@ -2286,7 +2294,7 @@ export async function startStdioServer(options: ServeStdioOptions = {}): Promise
   logger.info("Starting Redash MCP server...");
   const handle = serveStdio(
     () => {
-      const server = createRedashMcpServer();
+      const server = createRedashMcpServer({ networkTransport: "pipe", recordSession: true });
       logger.setServer(server);
       return server;
     },
@@ -2299,5 +2307,17 @@ export async function startStdioServer(options: ServeStdioOptions = {}): Promise
     },
   );
   logger.info("Redash MCP stdio server ready!");
-  return handle;
+  let closePromise: Promise<void> | undefined;
+  return {
+    close(): Promise<void> {
+      closePromise ??= (async () => {
+        try {
+          await handle.close();
+        } finally {
+          logger.setServer(null);
+        }
+      })();
+      return closePromise;
+    },
+  };
 }

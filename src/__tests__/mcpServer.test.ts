@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, type Transport } from "@modelcontextprotocol/server";
 import { jest } from "@jest/globals";
 import { createRedashMcpServer, startStdioServer, toolDefinitions } from "../index.js";
+import { PACKAGE_VERSION } from "../packageInfo.js";
 import { getRedashClient } from "../redashClient.js";
 import { CLIENT_VERSION_MATRIX } from "./clientFixtures.js";
 
@@ -20,6 +23,23 @@ describe("Redash MCP server", () => {
 
   it("defines all 67 public tools", () => {
     expect(toolDefinitions).toHaveLength(67);
+  });
+
+  it("advertises the published package version", async () => {
+    const manifest = JSON.parse(
+      readFileSync(resolve(process.cwd(), "package.json"), "utf8"),
+    ) as { version: string };
+    const connection = await connectDirectClient();
+
+    try {
+      expect(PACKAGE_VERSION).toBe(manifest.version);
+      expect(connection.client.getServerVersion()).toMatchObject({
+        name: "redash-mcp",
+        version: PACKAGE_VERSION,
+      });
+    } finally {
+      await connection.close();
+    }
   });
 
   it("registers every defined tool with descriptions and Zod-generated input schemas", async () => {
