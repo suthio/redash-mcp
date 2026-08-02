@@ -30,7 +30,11 @@ jobs:
           package-manager-cache: false
 
       - name: Normalize package metadata
-        run: npm pkg fix
+        run: |
+          npm pkg fix
+          npm pkg set \
+            repository.type=git \
+            repository.url=https://github.com/suthio/redash-mcp
           
       - name: Install dependencies
         run: npm ci
