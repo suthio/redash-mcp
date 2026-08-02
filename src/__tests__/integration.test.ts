@@ -10,20 +10,24 @@ process.env.REDASH_URL = 'https://redash.example.com';
 process.env.REDASH_API_KEY = 'test-api-key';
 process.env.REDASH_TIMEOUT = '30000';
 
-import { redashClient } from '../redashClient.js';
+import { redashClient, RedashClient } from '../redashClient.js';
+import { toolDefinitions } from '../index.js';
 import { logger } from '../logger.js';
 import { jest } from '@jest/globals';
 
 // Mock axios to avoid real API calls
 jest.mock('axios');
 
-describe('MCP Server Integration', () => {
-  beforeEach(() => {
-    // Set up environment variables for testing
-    process.env.REDASH_URL = 'https://redash.example.com';
-    process.env.REDASH_API_KEY = 'test-api-key';
-  });
+function getToolInputSchema(name: string) {
+  const tool = toolDefinitions.find((definition) => definition.name === name);
+  if (!tool) {
+    throw new Error(`Tool ${name} is not registered`);
+  }
 
+  return tool.inputSchema;
+}
+
+describe('MCP Server Integration', () => {
   describe('redashClient and logger integration', () => {
     it('should use logger for error reporting', async () => {
       const errorSpy = jest.spyOn(logger, 'error');
@@ -59,12 +63,7 @@ describe('MCP Server Integration', () => {
       delete process.env.REDASH_URL;
       delete process.env.REDASH_API_KEY;
 
-      // This should be tested in RedashClient constructor
-      expect(() => {
-        // Constructor is called when importing, so we need to re-import
-        const { RedashClient } = require('../redashClient.js');
-        new RedashClient();
-      }).toThrow();
+      expect(() => new RedashClient()).toThrow();
 
       // Restore
       process.env.REDASH_URL = originalUrl;
@@ -74,17 +73,7 @@ describe('MCP Server Integration', () => {
 
   describe('Tool schemas validation', () => {
     it('should validate query creation parameters', () => {
-      const { z } = require('zod');
-
-      const createQuerySchema = z.object({
-        name: z.string(),
-        data_source_id: z.number(),
-        query: z.string(),
-        description: z.string().optional(),
-        options: z.any().optional(),
-        schedule: z.any().optional(),
-        tags: z.array(z.string()).optional()
-      });
+      const createQuerySchema = getToolInputSchema('create_query');
 
       const validData = {
         name: 'Test Query',
@@ -104,20 +93,7 @@ describe('MCP Server Integration', () => {
     });
 
     it('should validate query update parameters', () => {
-      const { z } = require('zod');
-
-      const updateQuerySchema = z.object({
-        queryId: z.number(),
-        name: z.string().optional(),
-        data_source_id: z.number().optional(),
-        query: z.string().optional(),
-        description: z.string().optional(),
-        options: z.any().optional(),
-        schedule: z.any().optional(),
-        tags: z.array(z.string()).optional(),
-        is_archived: z.boolean().optional(),
-        is_draft: z.boolean().optional()
-      });
+      const updateQuerySchema = getToolInputSchema('update_query');
 
       const validData = {
         queryId: 123,
@@ -135,13 +111,7 @@ describe('MCP Server Integration', () => {
     });
 
     it('should validate execute query parameters', () => {
-      const { z } = require('zod');
-
-      const executeQuerySchema = z.object({
-        queryId: z.number(),
-        parameters: z.record(z.any()).optional(),
-        maxAge: z.number().optional()
-      });
+      const executeQuerySchema = getToolInputSchema('execute_query');
 
       const validData = {
         queryId: 123,
@@ -158,14 +128,7 @@ describe('MCP Server Integration', () => {
     });
 
     it('should validate parameterized query execution parameters', () => {
-      const { z } = require('zod');
-
-      const executeParameterizedQuerySchema = z.object({
-        queryId: z.number(),
-        parameters: z.record(z.any()).optional(),
-        useSavedDefaults: z.boolean().optional(),
-        maxAge: z.number().optional(),
-      });
+      const executeParameterizedQuerySchema = getToolInputSchema('execute_parameterized_query');
 
       expect(() => executeParameterizedQuerySchema.parse({
         queryId: 123,
@@ -175,20 +138,13 @@ describe('MCP Server Integration', () => {
       })).not.toThrow();
 
       expect(() => executeParameterizedQuerySchema.parse({
+        // missing queryId
         parameters: { category: 'example-value' },
       })).toThrow();
     });
 
     it('should validate visualization creation parameters', () => {
-      const { z } = require('zod');
-
-      const createVisualizationSchema = z.object({
-        query_id: z.number(),
-        type: z.string(),
-        name: z.string(),
-        description: z.string().optional(),
-        options: z.any()
-      });
+      const createVisualizationSchema = getToolInputSchema('create_visualization');
 
       const validData = {
         query_id: 1,
@@ -209,7 +165,7 @@ describe('MCP Server Integration', () => {
     });
 
     it('should validate chart visualization update parameters', () => {
-      const { chartVisualizationUpdateSchema } = require('../chartVisualization.js');
+      const updateChartVisualizationSchema = getToolInputSchema('update_chart_visualization');
 
       const validData = {
         visualizationId: 184,
@@ -218,47 +174,14 @@ describe('MCP Server Integration', () => {
         chartOptions: { legend: { enabled: true } },
       };
 
-      expect(() => chartVisualizationUpdateSchema.parse(validData)).not.toThrow();
+      expect(() => updateChartVisualizationSchema.parse(validData)).not.toThrow();
 
       const invalidData = {
+        // missing visualizationId
         globalSeriesType: 'column',
       };
 
-      expect(() => chartVisualizationUpdateSchema.parse(invalidData)).toThrow();
-    });
-  });
-
-  describe('Resource URI parsing', () => {
-    it('should parse query resource URIs', () => {
-      const uri = 'redash://query/123';
-      const match = uri.match(/^redash:\/\/(query|dashboard)\/(\d+)$/);
-
-      expect(match).not.toBeNull();
-      expect(match![1]).toBe('query');
-      expect(match![2]).toBe('123');
-    });
-
-    it('should parse dashboard resource URIs', () => {
-      const uri = 'redash://dashboard/456';
-      const match = uri.match(/^redash:\/\/(query|dashboard)\/(\d+)$/);
-
-      expect(match).not.toBeNull();
-      expect(match![1]).toBe('dashboard');
-      expect(match![2]).toBe('456');
-    });
-
-    it('should reject invalid resource URIs', () => {
-      const invalidUris = [
-        'redash://invalid/123',
-        'redash://query/abc',
-        'invalid://query/123',
-        'redash://query',
-      ];
-
-      invalidUris.forEach((uri) => {
-        const match = uri.match(/^redash:\/\/(query|dashboard)\/(\d+)$/);
-        expect(match).toBeNull();
-      });
+      expect(() => updateChartVisualizationSchema.parse(invalidData)).toThrow();
     });
   });
 });

@@ -1,63 +1,61 @@
 #!/usr/bin/env node
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import * as path from "node:path";
 import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema
-} from "@modelcontextprotocol/sdk/types.js";
-import { z, type ZodTypeAny } from "zod";
+  McpServer,
+  ResourceTemplate,
+  type CallToolResult,
+  type Variables,
+} from "@modelcontextprotocol/server";
+import { serveStdio, type ServeStdioOptions, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
+import { z, type ZodObject, type ZodRawShape } from "zod";
 import * as dotenv from 'dotenv';
 import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { buildChartVisualizationOptions, chartVisualizationUpdateSchema } from "./chartVisualization.js";
 import { mergeNamedEntries, queryParameterPatchSchema, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema } from "./parameterManagement.js";
-import { buildInputSchema, type JsonSchemaDescriptionMap } from "./jsonSchema.js";
 import { buildParameterizedExecutionParameters, ParameterizedExecutionError } from "./parameterizedExecution.js";
 import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
-import { logger, LogLevel } from "./logger.js";
+import { logger } from "./logger.js";
 
 // Load environment variables
 dotenv.config({ quiet: true });
 
-// Create MCP server instance
-const server = new Server(
-  {
-    name: "redash-mcp",
-    version: "1.1.0"
-  },
-  {
-    capabilities: {
-      tools: {},
-      resources: {}
-    }
-  }
-);
-
-// Set up server logging
-logger.info('Starting Redash MCP server...');
-
 const emptyInputSchema = z.object({});
 
-function defineTool(
+type SchemaDescriptions = Record<string, string>;
+
+function describeSchemaFields<T extends ZodRawShape>(
+  schema: ZodObject<T>,
+  descriptions: SchemaDescriptions,
+): ZodObject<T> {
+  const describedShape = Object.fromEntries(
+    Object.entries(schema.shape).map(([name, fieldSchema]) => [
+      name,
+      descriptions[name] ? (fieldSchema as z.ZodType).describe(descriptions[name]) : fieldSchema,
+    ]),
+  ) as T;
+
+  return schema.extend(describedShape) as ZodObject<T>;
+}
+
+function defineTool<T extends ZodRawShape>(
   name: string,
   description: string,
-  schema: ZodTypeAny = emptyInputSchema,
-  schemaDescriptions: JsonSchemaDescriptionMap = {}
+  schema: ZodObject<T> = emptyInputSchema as ZodObject<T>,
+  schemaDescriptions: SchemaDescriptions = {},
 ) {
   return {
     name,
     description,
-    inputSchema: buildInputSchema(schema, schemaDescriptions),
+    inputSchema: describeSchemaFields(schema, schemaDescriptions),
   };
 }
 
 const paginationSchemaDescriptions = {
   page: "Page number (starts at 1)",
   pageSize: "Number of results per page",
-} satisfies JsonSchemaDescriptionMap;
+} satisfies SchemaDescriptions;
 
 // ----- Tools Implementation -----
 
@@ -99,8 +97,8 @@ const createQuerySchema = z.object({
   data_source_id: z.coerce.number(),
   query: z.string(),
   description: z.string().optional(),
-  options: z.record(z.any()).optional(),
-  schedule: z.record(z.any()).optional(),
+  options: z.record(z.string(), z.any()).optional(),
+  schedule: z.record(z.string(), z.any()).optional(),
   tags: z.array(z.string()).optional()
 });
 
@@ -152,8 +150,8 @@ const updateQuerySchema = z.object({
   data_source_id: z.coerce.number().optional(),
   query: z.string().optional(),
   description: z.string().optional(),
-  options: z.record(z.any()).optional(),
-  schedule: z.record(z.any()).optional(),
+  options: z.record(z.string(), z.any()).optional(),
+  schedule: z.record(z.string(), z.any()).optional(),
   tags: z.array(z.string()).optional(),
   is_archived: z.boolean().optional(),
   is_draft: z.boolean().optional()
@@ -390,7 +388,7 @@ async function listQueries(params: z.infer<typeof listQueriesSchema>) {
 // Tool: execute_query
 const executeQuerySchema = z.object({
   queryId: z.coerce.number(),
-  parameters: z.record(z.any()).optional(),
+  parameters: z.record(z.string(), z.any()).optional(),
   maxAge: z.coerce.number().optional()
 });
 
@@ -424,7 +422,7 @@ async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
 // Tool: execute_parameterized_query
 const executeParameterizedQuerySchema = z.object({
   queryId: z.coerce.number(),
-  parameters: z.record(z.any()).optional().default({}),
+  parameters: z.record(z.string(), z.any()).optional().default({}),
   useSavedDefaults: z.boolean().optional().default(true),
   maxAge: z.coerce.number().optional()
 });
@@ -717,7 +715,7 @@ const createVisualizationSchema = z.object({
   type: z.string(),
   name: z.string(),
   description: z.string().optional(),
-  options: z.record(z.any())
+  options: z.record(z.string(), z.any())
 });
 
 async function createVisualization(params: z.infer<typeof createVisualizationSchema>) {
@@ -760,7 +758,7 @@ const updateVisualizationSchema = z.object({
   type: z.string().optional(),
   name: z.string().optional(),
   description: z.string().optional(),
-  options: z.record(z.any()).optional()
+  options: z.record(z.string(), z.any()).optional()
 });
 
 async function updateVisualization(params: z.infer<typeof updateVisualizationSchema>) {
@@ -1299,11 +1297,11 @@ const createAlertSchema = z.object({
   name: z.string(),
   query_id: z.coerce.number(),
   options: z.object({
-    column: z.string(),
-    op: z.string(),
-    value: z.union([z.coerce.number(), z.string()]),
-    custom_subject: z.string().optional(),
-    custom_body: z.string().optional()
+    column: z.string().describe("Column name to monitor"),
+    op: z.string().describe("Comparison operator: greater than, less than, equals, not equals, etc."),
+    value: z.union([z.coerce.number(), z.string()]).describe("Threshold value to compare against"),
+    custom_subject: z.string().optional().describe("Custom email subject"),
+    custom_body: z.string().optional().describe("Custom email body")
   }),
   rearm: z.coerce.number().nullable().optional()
 });
@@ -1335,11 +1333,11 @@ const updateAlertSchema = z.object({
   name: z.string().optional(),
   query_id: z.coerce.number().optional(),
   options: z.object({
-    column: z.string().optional(),
-    op: z.string().optional(),
-    value: z.union([z.coerce.number(), z.string()]).optional(),
-    custom_subject: z.string().optional(),
-    custom_body: z.string().optional()
+    column: z.string().optional().describe("Column name to monitor"),
+    op: z.string().optional().describe("Comparison operator"),
+    value: z.union([z.coerce.number(), z.string()]).optional().describe("Threshold value"),
+    custom_subject: z.string().optional().describe("Custom email subject"),
+    custom_body: z.string().optional().describe("Custom email body")
   }).optional(),
   rearm: z.coerce.number().nullable().optional()
 });
@@ -1656,7 +1654,7 @@ const createWidgetSchema = z.object({
   visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
   width: z.coerce.number(),
-  options: z.record(z.any()).optional(),
+  options: z.record(z.string(), z.any()).optional(),
   position: widgetPositionSchema.optional()
 });
 
@@ -1689,7 +1687,7 @@ const updateWidgetSchema = z.object({
   visualization_id: z.coerce.number().optional(),
   text: z.string().optional(),
   width: z.coerce.number().optional(),
-  options: z.record(z.any()).optional(),
+  options: z.record(z.string(), z.any()).optional(),
   position: widgetPositionSchema.optional()
 });
 
@@ -2059,11 +2057,8 @@ async function listDestinations() {
 
 
 // ----- Resources Implementation -----
-
-// List available resources
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
+async function listRedashResources() {
   try {
-    // List queries as resources
     const queries = await redashClient.getQueries(1, 100);
     const queryResources = queries.results.map(query => ({
       uri: `redash://query/${query.id}`,
@@ -2071,7 +2066,6 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
       description: query.description || `Query ID: ${query.id}`
     }));
 
-    // List dashboards as resources
     const dashboards = await redashClient.getDashboards(1, 100);
     const dashboardResources = dashboards.results.map(dashboard => ({
       uri: `redash://dashboard/${dashboard.id}`,
@@ -2083,35 +2077,30 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
       resources: [...queryResources, ...dashboardResources]
     };
   } catch (error) {
-    console.error('Error listing resources:', error);
+    logger.error(`Error listing resources: ${error instanceof Error ? error.message : String(error)}`);
     return {
       resources: []
     };
   }
-});
+}
 
-// Read resource content
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  const { uri } = request.params;
-
+async function readRedashResource(uri: URL, variables: Variables) {
   try {
-    const match = uri.match(/^redash:\/\/(query|dashboard)\/(\d+)$/);
+    const type = getResourceVariable(variables.type, "type", uri);
+    const resourceId = Number.parseInt(getResourceVariable(variables.id, "id", uri), 10);
 
-    if (!match) {
-      throw new Error(`Invalid resource URI: ${uri}`);
+    if (!Number.isSafeInteger(resourceId) || resourceId < 0) {
+      throw new Error(`Invalid resource URI: ${uri.href}`);
     }
 
-    const [, type, id] = match;
-    const resourceId = parseInt(id, 10);
-
-    if (type === 'query') {
+    if (type === "query") {
       const query = await redashClient.getQuery(resourceId);
       const result = await redashClient.executeQuery(resourceId);
 
       return {
         contents: [
           {
-            uri,
+            uri: uri.href,
             mimeType: "application/json",
             text: JSON.stringify({
               query: query,
@@ -2120,13 +2109,13 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
           }
         ]
       };
-    } else if (type === 'dashboard') {
+    } else if (type === "dashboard") {
       const dashboard = await redashClient.getDashboard(resourceId);
 
       return {
         contents: [
           {
-            uri,
+            uri: uri.href,
             mimeType: "application/json",
             text: JSON.stringify(dashboard, null, 2)
           }
@@ -2136,10 +2125,18 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
     throw new Error(`Unsupported resource type: ${type}`);
   } catch (error) {
-    console.error(`Error reading resource ${uri}:`, error);
+    logger.error(`Error reading resource ${uri.href}: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
-});
+}
+
+function getResourceVariable(value: string | string[] | undefined, name: string, uri: URL): string {
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${name} in resource URI: ${uri.href}`);
+  }
+
+  return value;
+}
 
 const chartVisualizationSchemaDescriptions = {
   visualizationId: "ID of the visualization to update",
@@ -2176,34 +2173,24 @@ const chartVisualizationSchemaDescriptions = {
   linkFormat: "Click-through URL template",
   missingValuesAsZero: "Convert missing values to zero",
   chartOptions: "Raw Redash chart options to merge into the payload",
-} satisfies JsonSchemaDescriptionMap;
+} satisfies SchemaDescriptions;
 
 const createAlertSchemaDescriptions = {
   name: "Name of the alert",
   query_id: "ID of the query to monitor",
   options: "Alert options including column to monitor, operator, and threshold value",
-  "options.column": "Column name to monitor",
-  "options.op": "Comparison operator: greater than, less than, equals, not equals, etc.",
-  "options.value": "Threshold value to compare against",
-  "options.custom_subject": "Custom email subject",
-  "options.custom_body": "Custom email body",
   rearm: "Number of seconds to wait before triggering again (null for never)",
-} satisfies JsonSchemaDescriptionMap;
+} satisfies SchemaDescriptions;
 
 const updateAlertSchemaDescriptions = {
   alertId: "ID of the alert to update",
   name: "New name of the alert",
   query_id: "ID of the query to monitor",
   options: "Alert options",
-  "options.column": "Column name to monitor",
-  "options.op": "Comparison operator",
-  "options.value": "Threshold value",
-  "options.custom_subject": "Custom email subject",
-  "options.custom_body": "Custom email body",
   rearm: "Number of seconds to wait before triggering again",
-} satisfies JsonSchemaDescriptionMap;
+} satisfies SchemaDescriptions;
 
-const toolDefinitions = [
+export const toolDefinitions = [
   defineTool("list_queries", "List all available queries in Redash", listQueriesSchema, {
     ...paginationSchemaDescriptions,
     q: "Search query",
@@ -2470,363 +2457,171 @@ const toolDefinitions = [
 ];
 
 // ----- Register Tools -----
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: toolDefinitions,
-  };
-});
+type RedashToolHandler = (args: any) => Promise<unknown>;
 
-// Handle tool execution requests
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+const toolHandlers: Record<string, RedashToolHandler> = {
+  list_queries: listQueries,
+  get_query: getQuery,
+  create_query: createQuery,
+  update_query: updateQuery,
+  get_query_parameters: getQueryParameters,
+  update_query_parameters: updateQueryParameters,
+  archive_query: archiveQuery,
+  list_data_sources: listDataSources,
+  execute_query: executeQuery,
+  execute_parameterized_query: executeParameterizedQuery,
+  get_query_results_csv: getQueryResultsCsv,
+  list_dashboards: listDashboards,
+  get_dashboard: getDashboard,
+  get_dashboard_layout: getDashboardLayout,
+  get_dashboard_by_slug: getDashboardBySlug,
+  get_visualization: getVisualization,
+  execute_adhoc_query: executeAdhocQuery,
+  create_visualization: createVisualization,
+  update_visualization: updateVisualization,
+  update_chart_visualization: updateChartVisualization,
+  delete_visualization: deleteVisualization,
+  get_schema: getSchema,
+  create_dashboard: createDashboard,
+  update_dashboard: updateDashboard,
+  get_dashboard_parameters: getDashboardParameters,
+  update_dashboard_parameters: updateDashboardParameters,
+  archive_dashboard: archiveDashboard,
+  fork_dashboard: forkDashboard,
+  get_public_dashboard: getPublicDashboard,
+  share_dashboard: shareDashboard,
+  unshare_dashboard: unshareDashboard,
+  get_my_dashboards: getMyDashboards,
+  get_favorite_dashboards: getFavoriteDashboards,
+  add_dashboard_favorite: addDashboardFavorite,
+  remove_dashboard_favorite: removeDashboardFavorite,
+  get_dashboard_tags: getDashboardTags,
+  list_alerts: listAlerts,
+  get_alert: getAlert,
+  create_alert: createAlert,
+  update_alert: updateAlert,
+  delete_alert: deleteAlert,
+  mute_alert: muteAlert,
+  get_alert_subscriptions: getAlertSubscriptions,
+  add_alert_subscription: addAlertSubscription,
+  remove_alert_subscription: removeAlertSubscription,
+  fork_query: forkQuery,
+  get_my_queries: getMyQueries,
+  get_recent_queries: getRecentQueries,
+  get_query_tags: getQueryTags,
+  get_favorite_queries: getFavoriteQueries,
+  add_query_favorite: addQueryFavorite,
+  remove_query_favorite: removeQueryFavorite,
+  list_widgets: listWidgets,
+  get_widget: getWidget,
+  create_widget: createWidget,
+  update_widget: updateWidget,
+  update_widget_layout: updateWidgetLayout,
+  update_dashboard_layout: updateDashboardLayout,
+  get_widget_parameter_mappings: getWidgetParameterMappings,
+  update_widget_parameter_mappings: updateWidgetParameterMappings,
+  delete_widget: deleteWidget,
+  list_query_snippets: listQuerySnippets,
+  get_query_snippet: getQuerySnippet,
+  create_query_snippet: createQuerySnippet,
+  update_query_snippet: updateQuerySnippet,
+  delete_query_snippet: deleteQuerySnippet,
+  list_destinations: listDestinations,
+};
 
-  logger.debug(`Tool request received: ${name} with args: ${JSON.stringify(args)}`);
+export function createRedashMcpServer(): McpServer {
+  const server = new McpServer({
+    name: "redash-mcp",
+    version: "1.1.0",
+  });
 
-  try {
-    // First perform type checking for early validation to catch errors when the provided schema doesn't match expectations
-    // This prevents confusion between similar tool names like create_query and execute_query
-    if (name === "create_query") {
-      try {
-        logger.debug(`Validating create_query schema`);
-        const validatedArgs = createQuerySchema.parse(args);
-        logger.debug(`Schema validation passed for create_query: ${JSON.stringify(validatedArgs)}`);
-        return await createQuery(validatedArgs);
-      } catch (validationError) {
-        logger.error(`Schema validation failed for create_query: ${validationError}`);
-        return {
-          isError: true,
-          content: [{
-            type: "text",
-            text: `Invalid parameters for create_query: ${validationError instanceof Error ? validationError.message : String(validationError)}`
-          }]
-        };
-      }
-    } else if (name === "update_query") {
-      try {
-        logger.debug(`Validating update_query schema`);
-        const validatedArgs = updateQuerySchema.parse(args);
-        logger.debug(`Schema validation passed for update_query: ${JSON.stringify(validatedArgs)}`);
-        return await updateQuery(validatedArgs);
-      } catch (validationError) {
-        logger.error(`Schema validation failed for update_query: ${validationError}`);
-        return {
-          isError: true,
-          content: [{
-            type: "text",
-            text: `Invalid parameters for update_query: ${validationError instanceof Error ? validationError.message : String(validationError)}`
-          }]
-        };
-      }
+  for (const tool of toolDefinitions) {
+    const handler = toolHandlers[tool.name];
+    if (!handler) {
+      throw new Error(`No handler registered for tool: ${tool.name}`);
     }
 
-    // Switch statement for other tools
-    switch (name) {
-      case "list_queries":
-        logger.debug(`Handling list_queries`);
-        return await listQueries(listQueriesSchema.parse(args));
-
-      case "get_query":
-        logger.debug(`Handling get_query`);
-        return await getQuery(getQuerySchema.parse(args));
-
-      // create_query and update_query are already handled in the if-else above
-
-      case "get_query_parameters":
-        logger.debug(`Handling get_query_parameters`);
-        return await getQueryParameters(getQueryParametersSchema.parse(args));
-
-      case "update_query_parameters":
-        logger.debug(`Handling update_query_parameters`);
-        return await updateQueryParameters(updateQueryParametersSchema.parse(args));
-
-      case "archive_query":
-        logger.debug(`Handling archive_query`);
-        return await archiveQuery(archiveQuerySchema.parse(args));
-
-      case "list_data_sources":
-        logger.debug(`Handling list_data_sources`);
-        return await listDataSources();
-
-      case "execute_query":
-        logger.debug(`Handling execute_query`);
-        return await executeQuery(executeQuerySchema.parse(args));
-
-      case "execute_parameterized_query":
-        logger.debug(`Handling execute_parameterized_query`);
-        return await executeParameterizedQuery(executeParameterizedQuerySchema.parse(args));
-
-      case "get_query_results_csv":
-        logger.debug(`Handling get_query_results_csv`);
-        return await getQueryResultsCsv(getQueryResultsCsvSchema.parse(args));
-
-      case "list_dashboards":
-        logger.debug(`Handling list_dashboards`);
-        return await listDashboards(listDashboardsSchema.parse(args));
-
-      case "get_dashboard":
-        logger.debug(`Handling get_dashboard`);
-        return await getDashboard(getDashboardSchema.parse(args));
-
-      case "get_dashboard_layout":
-        logger.debug(`Handling get_dashboard_layout`);
-        return await getDashboardLayout(getDashboardLayoutSchema.parse(args));
-
-      case "get_dashboard_by_slug":
-        logger.debug(`Handling get_dashboard_by_slug`);
-        return await getDashboardBySlug(getDashboardBySlugSchema.parse(args));
-
-      case "get_visualization":
-        logger.debug(`Handling get_visualization`);
-        return await getVisualization(getVisualizationSchema.parse(args));
-
-      case "execute_adhoc_query":
-        logger.debug(`Handling execute_adhoc_query`);
-        return await executeAdhocQuery(executeAdhocQuerySchema.parse(args));
-
-      case "create_visualization":
-        return await createVisualization(createVisualizationSchema.parse(args));
-
-      case "update_visualization":
-        return await updateVisualization(updateVisualizationSchema.parse(args));
-
-      case "update_chart_visualization":
-        return await updateChartVisualization(chartVisualizationUpdateSchema.parse(args));
-
-      case "delete_visualization":
-        return await deleteVisualization(deleteVisualizationSchema.parse(args));
-
-      case "get_schema":
-        logger.debug(`Handling get_schema`);
-        return await getSchema(getSchemaSchema.parse(args));
-
-      // Dashboard tools
-      case "create_dashboard":
-        logger.debug(`Handling create_dashboard`);
-        return await createDashboard(createDashboardSchema.parse(args));
-
-      case "update_dashboard":
-        logger.debug(`Handling update_dashboard`);
-        return await updateDashboard(updateDashboardSchema.parse(args));
-
-      case "get_dashboard_parameters":
-        logger.debug(`Handling get_dashboard_parameters`);
-        return await getDashboardParameters(getDashboardParametersSchema.parse(args));
-
-      case "update_dashboard_parameters":
-        logger.debug(`Handling update_dashboard_parameters`);
-        return await updateDashboardParameters(updateDashboardParametersSchema.parse(args));
-
-      case "archive_dashboard":
-        logger.debug(`Handling archive_dashboard`);
-        return await archiveDashboard(archiveDashboardSchema.parse(args));
-
-      case "fork_dashboard":
-        logger.debug(`Handling fork_dashboard`);
-        return await forkDashboard(forkDashboardSchema.parse(args));
-
-      case "get_public_dashboard":
-        logger.debug(`Handling get_public_dashboard`);
-        return await getPublicDashboard(getPublicDashboardSchema.parse(args));
-
-      case "share_dashboard":
-        logger.debug(`Handling share_dashboard`);
-        return await shareDashboard(shareDashboardSchema.parse(args));
-
-      case "unshare_dashboard":
-        logger.debug(`Handling unshare_dashboard`);
-        return await unshareDashboard(unshareDashboardSchema.parse(args));
-
-      case "get_my_dashboards":
-        logger.debug(`Handling get_my_dashboards`);
-        return await getMyDashboards(getMyDashboardsSchema.parse(args));
-
-      case "get_favorite_dashboards":
-        logger.debug(`Handling get_favorite_dashboards`);
-        return await getFavoriteDashboards(getFavoriteDashboardsSchema.parse(args));
-
-      case "add_dashboard_favorite":
-        logger.debug(`Handling add_dashboard_favorite`);
-        return await addDashboardFavorite(addDashboardFavoriteSchema.parse(args));
-
-      case "remove_dashboard_favorite":
-        logger.debug(`Handling remove_dashboard_favorite`);
-        return await removeDashboardFavorite(removeDashboardFavoriteSchema.parse(args));
-
-      case "get_dashboard_tags":
-        logger.debug(`Handling get_dashboard_tags`);
-        return await getDashboardTags();
-
-      // Alert tools
-      case "list_alerts":
-        logger.debug(`Handling list_alerts`);
-        return await listAlerts();
-
-      case "get_alert":
-        logger.debug(`Handling get_alert`);
-        return await getAlert(getAlertSchema.parse(args));
-
-      case "create_alert":
-        logger.debug(`Handling create_alert`);
-        return await createAlert(createAlertSchema.parse(args));
-
-      case "update_alert":
-        logger.debug(`Handling update_alert`);
-        return await updateAlert(updateAlertSchema.parse(args));
-
-      case "delete_alert":
-        logger.debug(`Handling delete_alert`);
-        return await deleteAlert(deleteAlertSchema.parse(args));
-
-      case "mute_alert":
-        logger.debug(`Handling mute_alert`);
-        return await muteAlert(muteAlertSchema.parse(args));
-
-      case "get_alert_subscriptions":
-        logger.debug(`Handling get_alert_subscriptions`);
-        return await getAlertSubscriptions(getAlertSubscriptionsSchema.parse(args));
-
-      case "add_alert_subscription":
-        logger.debug(`Handling add_alert_subscription`);
-        return await addAlertSubscription(addAlertSubscriptionSchema.parse(args));
-
-      case "remove_alert_subscription":
-        logger.debug(`Handling remove_alert_subscription`);
-        return await removeAlertSubscription(removeAlertSubscriptionSchema.parse(args));
-
-      // Additional Query tools
-      case "fork_query":
-        logger.debug(`Handling fork_query`);
-        return await forkQuery(forkQuerySchema.parse(args));
-
-      case "get_my_queries":
-        logger.debug(`Handling get_my_queries`);
-        return await getMyQueries(getMyQueriesSchema.parse(args));
-
-      case "get_recent_queries":
-        logger.debug(`Handling get_recent_queries`);
-        return await getRecentQueries(getRecentQueriesSchema.parse(args));
-
-      case "get_query_tags":
-        logger.debug(`Handling get_query_tags`);
-        return await getQueryTags();
-
-      case "get_favorite_queries":
-        logger.debug(`Handling get_favorite_queries`);
-        return await getFavoriteQueries(getFavoriteQueriesSchema.parse(args));
-
-      case "add_query_favorite":
-        logger.debug(`Handling add_query_favorite`);
-        return await addQueryFavorite(addQueryFavoriteSchema.parse(args));
-
-      case "remove_query_favorite":
-        logger.debug(`Handling remove_query_favorite`);
-        return await removeQueryFavorite(removeQueryFavoriteSchema.parse(args));
-
-      // Widget tools
-      case "list_widgets":
-        logger.debug(`Handling list_widgets`);
-        return await listWidgets();
-
-      case "get_widget":
-        logger.debug(`Handling get_widget`);
-        return await getWidget(getWidgetSchema.parse(args));
-
-      case "create_widget":
-        logger.debug(`Handling create_widget`);
-        return await createWidget(createWidgetSchema.parse(args));
-
-      case "update_widget":
-        logger.debug(`Handling update_widget`);
-        return await updateWidget(updateWidgetSchema.parse(args));
-
-      case "update_widget_layout":
-        logger.debug(`Handling update_widget_layout`);
-        return await updateWidgetLayout(updateWidgetLayoutSchema.parse(args));
-
-      case "update_dashboard_layout":
-        logger.debug(`Handling update_dashboard_layout`);
-        return await updateDashboardLayout(updateDashboardLayoutSchema.parse(args));
-
-      case "get_widget_parameter_mappings":
-        logger.debug(`Handling get_widget_parameter_mappings`);
-        return await getWidgetParameterMappings(getWidgetParameterMappingsSchema.parse(args));
-
-      case "update_widget_parameter_mappings":
-        logger.debug(`Handling update_widget_parameter_mappings`);
-        return await updateWidgetParameterMappings(updateWidgetParameterMappingsSchema.parse(args));
-
-      case "delete_widget":
-        logger.debug(`Handling delete_widget`);
-        return await deleteWidget(deleteWidgetSchema.parse(args));
-
-      // Query Snippet tools
-      case "list_query_snippets":
-        logger.debug(`Handling list_query_snippets`);
-        return await listQuerySnippets();
-
-      case "get_query_snippet":
-        logger.debug(`Handling get_query_snippet`);
-        return await getQuerySnippet(getQuerySnippetSchema.parse(args));
-
-      case "create_query_snippet":
-        logger.debug(`Handling create_query_snippet`);
-        return await createQuerySnippet(createQuerySnippetSchema.parse(args));
-
-      case "update_query_snippet":
-        logger.debug(`Handling update_query_snippet`);
-        return await updateQuerySnippet(updateQuerySnippetSchema.parse(args));
-
-      case "delete_query_snippet":
-        logger.debug(`Handling delete_query_snippet`);
-        return await deleteQuerySnippet(deleteQuerySnippetSchema.parse(args));
-
-      // Destination tools
-      case "list_destinations":
-        logger.debug(`Handling list_destinations`);
-        return await listDestinations();
-
-      default:
-        logger.error(`Unknown tool requested: ${name}`);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Unknown tool: ${name}`
-            }
-          ]
-        };
-    }
-  } catch (error) {
-    logger.error(`Error executing tool ${name}: ${error instanceof Error ? error.message : String(error)}`);
-    if (error instanceof z.ZodError) {
-      logger.error(`Validation error details: ${JSON.stringify(error.errors)}`);
-    }
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: `Error executing tool ${name}: ${error instanceof Error ? error.message : String(error)}`
-        }
-      ]
-    };
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      },
+      async (args: Record<string, unknown>) => {
+        logger.debug(`Tool request received: ${tool.name} with args: ${JSON.stringify(args)}`);
+        return await handler(args) as CallToolResult;
+      },
+    );
   }
-});
+
+  const redashResourceTemplate = new ResourceTemplate("redash://{type}/{id}", {
+    list: listRedashResources,
+  });
+
+  server.registerResource(
+    "redash-resource",
+    redashResourceTemplate,
+    {
+      description: "A saved Redash query or dashboard",
+    },
+    readRedashResource,
+  );
+
+  return server;
+}
 
 // Start the server with stdio transport
-async function main() {
+export async function startStdioServer(options: ServeStdioOptions = {}): Promise<StdioServerHandle> {
   try {
-    const transport = new StdioServerTransport();
-
     logger.info("Starting Redash MCP server...");
-    await server.connect(transport);
-    logger.setServer(server);
-    logger.info("Redash MCP server connected!");
+    let activeServer: McpServer | undefined;
+    const handle = serveStdio(
+      () => {
+        const server = createRedashMcpServer();
+        activeServer = server;
+        logger.setServer(server);
+        return server;
+      },
+      {
+        ...options,
+        onerror: (error) => {
+          options.onerror?.(error);
+          logger.error(`Stdio transport error: ${error.message}`);
+        },
+      },
+    );
+    logger.info("Redash MCP stdio server ready!");
+    return {
+      close: async () => {
+        await handle.close();
+        if (activeServer) {
+          logger.clearServer(activeServer);
+        }
+      },
+    };
   } catch (error) {
     logger.error(`Failed to start server: ${error}`);
     process.exit(1);
   }
 }
 
-main();
+function isDirectlyRun(): boolean {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    return false;
+  }
+
+  const normalizedEntrypoint = path.normalize(entrypoint);
+  return (
+    normalizedEntrypoint.endsWith(path.join("dist", "index.js")) ||
+    normalizedEntrypoint.endsWith(path.join("src", "index.ts"))
+  );
+}
+
+if (isDirectlyRun()) {
+  void runDirectly();
+}
+
+async function runDirectly(): Promise<void> {
+  await startStdioServer();
+}

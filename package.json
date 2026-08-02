@@ -40,14 +40,15 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "axios": "^1.19.0",
     "dotenv": "^17.4.2",
     "socks-proxy-agent": "^8.0.5",
-    "zod": "^3.22.4"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@playwright/test": "^1.57.0",
     "@types/jest": "^29.5.8",
     "@types/node": "^20.9.0",

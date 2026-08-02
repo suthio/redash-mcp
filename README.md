@@ -86,6 +86,8 @@ Notes:
    pnpm start
    ```
 
+   The default transport is stdio, which is the mode expected by most desktop MCP clients. The stdio entrypoint accepts both 2025-era MCP clients and clients that negotiate the current protocol.
+
 ## Usage with Claude for Desktop
 
 To use this MCP server with Claude for Desktop, configure it in your Claude for Desktop configuration file:
