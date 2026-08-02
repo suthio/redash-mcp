@@ -107,7 +107,7 @@ test.describe('MCP Inspector - Basic Tests', () => {
     expect(pageContent).toContain('redash-mcp');
   });
 
-  test('should list all 17 tools', async ({ page }) => {
+  test('should list representative registered tools', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
