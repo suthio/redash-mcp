@@ -2109,8 +2109,10 @@ async function readRedashResource(uri: URL, variables: Variables) {
     }
 
     if (type === "query") {
-      const query = await getRedashClient().getQuery(resourceId);
-      const result = await getRedashClient().executeQuery(resourceId);
+      const [query, result] = await Promise.all([
+        getRedashClient().getQuery(resourceId),
+        getRedashClient().executeQuery(resourceId),
+      ]);
 
       return {
         contents: [
