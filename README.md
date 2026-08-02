@@ -166,6 +166,8 @@ HTTP mode is stateless: the server does not issue `Mcp-Session-Id`, does not pro
 
 The default bind is localhost-only (`127.0.0.1`) with Host and Origin protection. Browser requests from allowed origins receive CORS response headers; other origins are rejected with `403 Forbidden`.
 
+`GET http://127.0.0.1:3000/healthz` returns `200 OK` with the body `ok` for lightweight health checks. It uses the same Host and Origin allowlists as the MCP endpoint and does not contact Redash. If `MCP_HTTP_PATH=/healthz`, that URL remains the MCP endpoint and the standalone health check is disabled with a startup warning.
+
 The CLI handles `SIGINT` and `SIGTERM` gracefully. For example, `docker stop` sends `SIGTERM`; the server closes active MCP streams and then waits for the HTTP listener to stop before the process exits.
 
 ## Docker

@@ -39,6 +39,56 @@ describe("HTTP MCP server", () => {
     expect(deleteResponse.headers.get("allow")).toBe("POST");
   });
 
+  it("serves a lightweight health check on GET /healthz", async () => {
+    const serverInfo = await startTestServer();
+
+    const response = await fetch(`${serverInfo.baseUrl}/healthz`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^text\/plain(?:;|$)/);
+    expect(await response.text()).toBe("ok");
+  });
+
+  it("protects the health check with the configured Host and Origin allowlists", async () => {
+    const serverInfo = await startTestServer();
+
+    const unexpectedHostStatus = await requestStatus(new URL(`${serverInfo.baseUrl}/healthz`), {
+      method: "GET",
+      headers: { Host: "attacker.example.com" },
+    }, "");
+    expect(unexpectedHostStatus).toBe(403);
+
+    const unexpectedOriginResponse = await fetch(`${serverInfo.baseUrl}/healthz`, {
+      headers: { Origin: "https://attacker.example.com" },
+    });
+    expect(unexpectedOriginResponse.status).toBe(403);
+  });
+
+  it("preserves an MCP endpoint configured at /healthz", async () => {
+    const serverInfo = await startTestServer({ path: "/healthz" });
+    const getResponse = await fetch(`${serverInfo.baseUrl}/healthz`);
+
+    expect(getResponse.status).toBe(405);
+    expect(getResponse.headers.get("allow")).toBe("POST");
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[WARNING] MCP_HTTP_PATH is "/healthz"; disabling the health check endpoint so the MCP endpoint remains available.',
+    );
+
+    const transport = new StreamableHTTPClientTransport(new URL(`${serverInfo.baseUrl}/healthz`));
+    const client = new Client(
+      { name: "health-route-collision-test", version: "1.0.0" },
+      MODERN_CLIENT_OPTIONS,
+    );
+
+    try {
+      await client.connect(transport);
+      const result = await client.listTools();
+      expect(result.tools).toHaveLength(toolDefinitions.length);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("returns 404 for unknown paths", async () => {
     const serverInfo = await startTestServer();
 

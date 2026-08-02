@@ -18,6 +18,7 @@ declare module "hono" {
 }
 
 const FORCE_CLOSE_GRACE_PERIOD_MS = 5_000;
+const HEALTH_CHECK_PATH = "/healthz";
 
 export interface HttpServerConfig {
   host: string;
@@ -54,6 +55,14 @@ export async function startHttpServer(config: HttpServerConfig): Promise<HttpSer
     parsedBody: context.get("parsedBody"),
   }));
   app.on(["GET", "DELETE"], config.path, methodNotAllowed);
+
+  if (config.path === HEALTH_CHECK_PATH) {
+    logger.warning(
+      'MCP_HTTP_PATH is "/healthz"; disabling the health check endpoint so the MCP endpoint remains available.',
+    );
+  } else {
+    app.get(HEALTH_CHECK_PATH, (context) => context.text("ok"));
+  }
 
   return new Promise((resolve, reject) => {
     const httpServer = serve({
