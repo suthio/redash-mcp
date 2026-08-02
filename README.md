@@ -44,6 +44,7 @@ Optional variables:
 - `MCP_HTTP_PATH`: Streamable HTTP endpoint path (default: `/mcp`).
 - `MCP_HTTP_ALLOWED_HOSTS`: Comma-separated Host header allowlist for Streamable HTTP mode. Values are hostnames without a scheme, port, path, or wildcard.
 - `MCP_HTTP_ALLOWED_ORIGINS`: Comma-separated browser Origin hostname allowlist. Values use the same hostname-only format and also control CORS responses. Set an empty value to reject every request that includes an `Origin` header.
+- OpenTelemetry variables: optional; see [OpenTelemetry observability](#opentelemetry-observability) for concrete OTLP and Prometheus configurations.
 
 Examples:
 
@@ -169,6 +170,134 @@ The default bind is localhost-only (`127.0.0.1`) with Host and Origin protection
 `GET http://127.0.0.1:3000/healthz` returns `200 OK` with the body `ok` for lightweight health checks. It uses the same Host and Origin allowlists as the MCP endpoint and does not contact Redash. If `MCP_HTTP_PATH=/healthz`, that URL remains the MCP endpoint and the standalone health check is disabled with a startup warning.
 
 The CLI handles `SIGINT` and `SIGTERM` gracefully. For example, `docker stop` sends `SIGTERM`; the server closes active MCP streams and then waits for the HTTP listener to stop before the process exits.
+
+## OpenTelemetry observability
+
+Operators use this integration to follow one MCP operation from the client, through this server, to Redash, and to alert on latency or process health. The CLI initializes OpenTelemetry automatically. With no exporter endpoint or exporter setting, it opens no telemetry network connection; application logs still go to stderr so stdio stdout remains reserved for MCP messages.
+
+Choose the setup that matches the system reading the telemetry:
+
+| Who reads it | Set these variables | Where data is available |
+| --- | --- | --- |
+| An OpenTelemetry Collector receiving all three signals | `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` | Traces, metrics, and logs at the Collector OTLP/HTTP receiver |
+| Prometheus scraping an HTTP-mode server | `OTEL_METRICS_EXPORTER=prometheus` | `GET http://127.0.0.1:3000/metrics` |
+| Prometheus scraping a stdio server | `OTEL_METRICS_EXPORTER=prometheus`, `OTEL_EXPORTER_PROMETHEUS_HOST=127.0.0.1`, `OTEL_EXPORTER_PROMETHEUS_PORT=9464` | `GET http://127.0.0.1:9464/metrics` |
+| A Collector plus Prometheus | `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`, `OTEL_METRICS_EXPORTER=otlp,prometheus` | OTLP metrics and the Prometheus endpoint |
+
+For example, this HTTP-mode command exports all signals over OTLP/HTTP and also lets Prometheus scrape the same listener:
+
+```bash
+REDASH_URL=https://redash.example.com \
+REDASH_API_KEY=your_api_key \
+MCP_TRANSPORT=http \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+OTEL_METRICS_EXPORTER=otlp,prometheus \
+pnpm start
+
+curl http://127.0.0.1:3000/metrics
+```
+
+The server emits these signals:
+
+| Signal | Representative data | What it answers |
+| --- | --- | --- |
+| Traces | inbound `POST /mcp`, MCP `tools/call list_queries`, outbound Redash `GET /api/queries` | Which MCP or Redash operation was slow or failed? |
+| Metrics | `mcp.server.operation.duration`, `mcp.server.session.duration`, `nodejs.eventloop.*`, `v8js.*`, `process.*`, `system.*`, HTTP client/server duration | Is latency, event-loop delay, memory, CPU, or network use changing? |
+| Logs | structured severity, fields, exception, and active `trace_id`/`span_id` | What happened inside the operation shown by a trace? |
+
+The names and attributes visible in a trace backend are deliberately stable:
+
+| What the MCP client does | Span name | Attributes used to filter it |
+| --- | --- | --- |
+| Calls `list_queries` | `tools/call list_queries` | `mcp.method.name=tools/call`, `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name=list_queries` |
+| Reads `redash://query/42` | `resources/read` | `mcp.resource.uri=redash://query/42`; the URI is kept out of the span name to avoid one span group per resource |
+| Sends JSON-RPC error code `-32601` | The MCP method name | `rpc.response.status_code=-32601`, `error.type=-32601`, and span status `ERROR` |
+| Posts to a custom endpoint `/redash-mcp` | `POST /redash-mcp` | `http.route=/redash-mcp` |
+
+`mcp.protocol.version` records the negotiated revision in both stdio and stateless HTTP operations. `mcp.server.session.duration` applies to the long-lived stdio connection; HTTP mode is stateless, so its useful lifecycle measurement is `mcp.server.operation.duration`. Both histograms use the MCP-recommended explicit latency buckets.
+
+SEP-414 `traceparent`, `tracestate`, and `baggage` values in MCP request `_meta` are accepted. The extracted MCP client context becomes the MCP server span's parent, while the HTTP transport span is linked to it. Logs emitted while the tool runs carry the MCP span's `trace_id` and `span_id`.
+
+Application log messages always go to stderr. When OTel Logs is configured, the same message is exported with its structured fields; those fields are not printed to stderr. A compatible stdio MCP client also receives the message through `notifications/message` for backward compatibility. Stateless HTTP does not send those notifications because each POST uses a fresh server instance; use OTel Logs or stderr there.
+
+### Exporter settings
+
+The OTLP exporters support gRPC, HTTP/protobuf, and HTTP/JSON:
+
+| Protocol | Variable value | Typical Collector endpoint |
+| --- | --- | --- |
+| OTLP/gRPC | `grpc` | `http://127.0.0.1:4317` |
+| OTLP/HTTP protobuf | `http/protobuf` | `http://127.0.0.1:4318` |
+| OTLP/HTTP JSON | `http/json` | `http://127.0.0.1:4318` |
+
+Set the shared `OTEL_EXPORTER_OTLP_PROTOCOL`, or override it with `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`, and `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`. The corresponding standard endpoint, header, certificate, compression, and timeout variables are passed to the OpenTelemetry exporters.
+
+An endpoint enables its signal. You can make the decision explicit with `OTEL_TRACES_EXPORTER=otlp`, `OTEL_METRICS_EXPORTER=otlp`, and `OTEL_LOGS_EXPORTER=otlp`, or disable one with `none`. For example, this keeps logs on stderr while sending traces and metrics:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.internal:4318
+OTEL_TRACES_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=none
+```
+
+`OTEL_SDK_DISABLED=true` disables every telemetry signal. Invalid telemetry settings or an unavailable exporter produce a warning on stderr but do not stop MCP or Redash requests. Application configuration errors such as a missing `REDASH_API_KEY` still fail startup.
+
+### Prometheus endpoint and content safety
+
+In HTTP mode, the embedded `/metrics` route uses the same Host allowlist as `/mcp`. If `MCP_HTTP_PATH=/metrics`, the server keeps that URL for MCP, traces it as `POST /metrics`, and disables the embedded Prometheus route with a warning. Set `OTEL_EXPORTER_PROMETHEUS_HOST` or `OTEL_EXPORTER_PROMETHEUS_PORT` to use a separate listener instead. A separate listener is not protected by the MCP Host/Origin checks, so bind it to `127.0.0.1` or protect it at the network layer.
+
+Safe operation metadata is always available. Content that may contain Redash data requires an explicit opt-in:
+
+| Data | Default | With `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` |
+| --- | --- | --- |
+| Tool name, query/data-source IDs, HTTP method/path/status, request header names | Recorded on the applicable span or OTel Log | Same |
+| Successful tool arguments and results, including SQL, description, options, visualizations, result rows, and CSV text | Omitted | Recorded once on the MCP `tools/call` span as `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result` |
+| Failed Redash request/response bodies and query job errors | Omitted | Recorded as structured OTel Log fields; stderr and the MCP error response remain content-free |
+| API keys and request header values | Never recorded | Never recorded |
+
+The option uses the GenAI instrumentation name because the OpenTelemetry MCP conventions model a tool call as a GenAI-compatible `execute_tool` operation. The Redash server does not perform model inference; it reuses the common `gen_ai.tool.call.*` attributes so an MCP call can be correlated with the agent that invoked it. Enable the option only when the trace and log backends are approved to retain Redash content.
+
+### Embedding the server in another Node.js process
+
+Initialize telemetry before importing the main package so Node HTTP and Axios are patched before Redash requests begin:
+
+```ts
+import {
+  initializeTelemetry,
+  shutdownTelemetry,
+} from "@suthio/redash-mcp/telemetry";
+
+await initializeTelemetry({ transport: "stdio" });
+const { createRedashMcpServer } = await import("@suthio/redash-mcp");
+const server = createRedashMcpServer();
+
+// Connect and use the server, then flush exporters during application shutdown.
+await server.close();
+await shutdownTelemetry();
+```
+
+When the embedding process exposes MCP over HTTP at `POST /redash-mcp`, pass that exact route during telemetry initialization and identify the application protocol when creating the server:
+
+```ts
+import {
+  initializeTelemetry,
+  shutdownTelemetry,
+} from "@suthio/redash-mcp/telemetry";
+
+await initializeTelemetry({ transport: "http", httpPath: "/redash-mcp" });
+const { createRedashMcpServer } = await import("@suthio/redash-mcp");
+const server = createRedashMcpServer({
+  networkTransport: "tcp",
+  networkProtocolName: "http",
+  recordSession: false,
+});
+
+// Connect `server` to the embedding process's POST /redash-mcp transport.
+await server.close();
+await shutdownTelemetry();
+```
 
 ## Docker
 
