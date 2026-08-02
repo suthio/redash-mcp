@@ -114,6 +114,18 @@ describe("Redash MCP server", () => {
     }
   });
 
+  it("reports resource listing failures to the MCP client", async () => {
+    jest.spyOn(redashClient, "getQueries").mockRejectedValue(new Error("Redash unavailable"));
+    jest.spyOn(redashClient, "getDashboards").mockResolvedValue({ results: [] } as never);
+    const connection = await connectDirectClient();
+
+    try {
+      await expect(connection.client.listResources()).rejects.toThrow("Redash unavailable");
+    } finally {
+      await connection.close();
+    }
+  });
+
   it.each(CLIENT_VERSION_MATRIX)("serves %s clients over the stdio entrypoint", async (_label, clientOptions) => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const handle = await startStdioServer({ transport: serverTransport });

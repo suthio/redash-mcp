@@ -2093,9 +2093,7 @@ async function listRedashResources() {
     };
   } catch (error) {
     logger.error(`Error listing resources: ${error instanceof Error ? error.message : String(error)}`);
-    return {
-      resources: []
-    };
+    throw error;
   }
 }
 
