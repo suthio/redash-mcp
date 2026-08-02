@@ -128,7 +128,9 @@ async function initializeTelemetryRuntime(options: InitializeTelemetryOptions): 
   const instrumentations: Instrumentation[] = [
     new HttpInstrumentation({
       ignoreIncomingRequestHook: (request) => {
-        return requestPath(request.url) === "/metrics" && mcpHttpPath !== "/metrics";
+        const path = requestPath(request.url);
+        return (path === "/metrics" && mcpHttpPath !== "/metrics")
+          || (path === "/healthz" && mcpHttpPath !== "/healthz");
       },
       requestHook: (span, request) => {
         if (!mcpHttpPath || !isIncomingRequest(request) || requestPath(request.url) !== mcpHttpPath) {

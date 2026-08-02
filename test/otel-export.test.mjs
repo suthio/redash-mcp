@@ -27,6 +27,10 @@ test("exports correlated MCP traces, metrics, and logs over OTLP/HTTP JSON", { t
     new URL(`http://127.0.0.1:${child.port}/redash-mcp`),
   );
 
+  const healthResponse = await fetch(`http://127.0.0.1:${child.port}/healthz`);
+  assert.equal(healthResponse.status, 200);
+  assert.equal(await healthResponse.text(), "ok");
+
   await client.connect(transport);
   await client.callTool({
     name: "list_queries",
@@ -80,6 +84,12 @@ test("exports correlated MCP traces, metrics, and logs over OTLP/HTTP JSON", { t
   assert.ok(collector.payloads.logs.length > 0, "log exports should reach /v1/logs");
 
   const spans = collector.payloads.traces.flatMap(flattenSpans);
+  const healthSpans = spans.filter((span) => {
+    const attributes = spanAttributes(span);
+    return attributes["url.path"] === "/healthz"
+      || String(attributes["url.full"] ?? "").includes("/healthz");
+  });
+  assert.equal(healthSpans.length, 0, "health probes should not create HTTP spans");
   const toolSpan = spans.find((span) => span.name === "tools/call list_queries");
   assert.ok(toolSpan, "the list_queries MCP span should be exported");
   assert.equal(toolSpan.traceId, "11111111111111111111111111111111");
