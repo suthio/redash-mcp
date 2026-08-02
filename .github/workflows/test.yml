@@ -28,3 +28,6 @@ jobs:
 
       - name: Run unit tests
         run: pnpm test --coverage
+
+      - name: Run OpenTelemetry export integration test
+        run: pnpm run test:otel

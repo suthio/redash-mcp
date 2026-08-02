@@ -38,6 +38,7 @@
     "start": "node dist/cli.js",
     "dev": "ts-node src/cli.ts",
     "test": "jest --passWithNoTests",
+    "test:otel": "pnpm run build && node --test test/otel-export.test.mjs",
     "inspector": "pnpm dlx @modelcontextprotocol/inspector node dist/cli.js",
     "inspector:headless": "BROWSER=none pnpm dlx @modelcontextprotocol/inspector node dist/cli.js",
     "e2e:test": "playwright test",
