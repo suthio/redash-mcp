@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       release_ref:
-        description: Git tag or commit to publish
+        description: Release tag or full commit SHA to publish (for example, v0.0.14)
         required: true
         type: string
 
 permissions:
   contents: read
   id-token: write
+  packages: write
 
 jobs:
   publish:
@@ -30,7 +31,7 @@ jobs:
       
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '20'
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
 
@@ -40,6 +41,47 @@ jobs:
           npm pkg set \
             repository.type=git \
             repository.url=https://github.com/suthio/redash-mcp
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        env:
+          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref_name }}
+        run: |
+          package_name="$(node --print "require('./package.json').name")"
+          package_version="$(node --print "require('./package.json').version")"
+          expected_tag="v${package_version}"
+          head_commit="$(git rev-parse HEAD)"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${RELEASE_REF}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            release_commit="$(printf '%s' "${RELEASE_REF}" | tr '[:upper:]' '[:lower:]')"
+            if [[ "${release_commit}" != "${head_commit}" ]]; then
+              echo "Release commit ${release_commit} does not match checked-out commit ${head_commit}." >&2
+              exit 1
+            fi
+          else
+            if [[ "${RELEASE_REF}" != "${expected_tag}" ]]; then
+              echo "Release ref ${RELEASE_REF} must be package version tag ${expected_tag} or a full commit SHA." >&2
+              exit 1
+            fi
+
+            if ! git show-ref --verify --quiet "refs/tags/${expected_tag}"; then
+              echo "Release ref ${RELEASE_REF} is not an available Git tag." >&2
+              exit 1
+            fi
+
+            tag_commit="$(git rev-parse "refs/tags/${expected_tag}^{commit}")"
+            if [[ "${head_commit}" != "${tag_commit}" ]]; then
+              echo "Checked-out commit ${head_commit} does not match ${expected_tag} at ${tag_commit}." >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "package_name=${package_name}"
+            echo "package_version=${package_version}"
+            echo "commit_sha=${head_commit}"
+          } >> "${GITHUB_OUTPUT}"
           
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
@@ -49,6 +91,89 @@ jobs:
         
       - name: Test
         run: pnpm test
-        
+
+      - name: Check npm publication status
+        id: npm-status
+        if: github.repository == 'suthio/redash-mcp'
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit_sha }}
+        run: |
+          package_spec="${PACKAGE_NAME}@${PACKAGE_VERSION}"
+          if npm_view_output="$(npm view "${package_spec}" version 2>&1)"; then
+            npm_view_status=0
+          else
+            npm_view_status=$?
+          fi
+
+          if [[ ${npm_view_status} -ne 0 ]]; then
+            if [[ "${npm_view_output}" == *"E404"* ]]; then
+              echo "${package_spec} is not published yet."
+              echo "published=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+
+            echo "Failed to check npm publication status for ${package_spec}:" >&2
+            echo "${npm_view_output}" >&2
+            exit "${npm_view_status}"
+          fi
+
+          published_git_head="$(npm view "${package_spec}" gitHead)"
+          if [[ -z "${published_git_head}" ]]; then
+            echo "${package_spec} is published without gitHead metadata; refusing to overwrite Docker release tags." >&2
+            exit 1
+          fi
+
+          if [[ "${published_git_head}" != "${RELEASE_COMMIT}" ]]; then
+            echo "${package_spec} was published from ${published_git_head}, not ${RELEASE_COMMIT}; refusing to overwrite Docker release tags." >&2
+            exit 1
+          fi
+
+          echo "${package_spec} is already published from ${RELEASE_COMMIT}; skipping npm publish."
+          echo "published=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Extract Docker metadata
+        id: docker-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=v${{ steps.release.outputs.package_version }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.docker-meta.outputs.tags }}
+          labels: ${{ steps.docker-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign Docker image
+        run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build-and-push.outputs.digest }}
+
       - name: Publish to npm
+        if: github.repository == 'suthio/redash-mcp' && steps.npm-status.outputs.published != 'true'
         run: npm publish --access public

@@ -1,0 +1,17 @@
+.git
+.github
+coverage
+dist
+node_modules
+playwright-report
+test-results
+
+.env
+.env.*
+!.env.example
+
+Dockerfile
+README.md
+CHANGELOG.md
+e2e
+src/__tests__

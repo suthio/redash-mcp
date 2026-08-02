@@ -42,6 +42,8 @@ Optional variables:
 - `MCP_HTTP_HOST`: Host for Streamable HTTP mode (default: `127.0.0.1`).
 - `MCP_HTTP_PORT`: Port for Streamable HTTP mode (default: `3000`).
 - `MCP_HTTP_PATH`: Streamable HTTP endpoint path (default: `/mcp`).
+- `MCP_HTTP_ALLOWED_HOSTS`: Comma-separated Host header allowlist for Streamable HTTP mode. Values are hostnames without a scheme, port, path, or wildcard.
+- `MCP_HTTP_ALLOWED_ORIGINS`: Comma-separated browser Origin hostname allowlist. Values use the same hostname-only format and also control CORS responses. Set an empty value to reject every request that includes an `Origin` header.
 
 Examples:
 
@@ -135,14 +137,50 @@ This starts `POST http://127.0.0.1:3000/mcp` by default. CLI flags override envi
 ```bash
 REDASH_URL=https://your-redash-instance.com \
 REDASH_API_KEY=your_api_key \
-pnpm start -- --transport http --host 127.0.0.1 --port 3333 --path /mcp
+pnpm start --transport http --host 127.0.0.1 --port 3333 --path /mcp
 ```
+
+For a non-local bind behind an authenticated, TLS-terminating reverse proxy, explicitly configure which request hosts and browser origins may reach the server. The equivalent CLI options are `--allowed-hosts` and `--allowed-origins`.
+
+```bash
+REDASH_URL=https://redash.example.com \
+REDASH_API_KEY=your_api_key \
+MCP_TRANSPORT=http \
+MCP_HTTP_HOST=0.0.0.0 \
+MCP_HTTP_ALLOWED_HOSTS=mcp.example.com \
+MCP_HTTP_ALLOWED_ORIGINS=app.example.com \
+pnpm start
+```
+
+| Who uses the server | MCP URL | Allowed Host header | Allowed browser Origin |
+| --- | --- | --- | --- |
+| Local MCP client | `http://127.0.0.1:3000/mcp` | `127.0.0.1` | `localhost`, `127.0.0.1`, `[::1]` |
+| Local Docker client | `http://localhost:3000/mcp` | `localhost` | `localhost`, `127.0.0.1`, `[::1]` |
+| Browser app at `https://app.example.com` through an authenticated reverse proxy | `https://mcp.example.com/mcp` | `mcp.example.com` | `app.example.com` |
+
+Host and Origin matching is case-insensitive and port-agnostic. For example, allowing `app.example.com` accepts the browser Origin `https://app.example.com:8443`. In HTTP mode, binding `MCP_HTTP_HOST` to a non-local address fails at startup unless both allowlist settings are explicitly present.
+
+Host and Origin allowlists protect against DNS rebinding and unwanted browser origins; they do not authenticate MCP clients. Do not expose the server listener directly to the internet. For `https://mcp.example.com/mcp`, keep the listener on a private network and require authentication at the reverse proxy or gateway.
 
 HTTP mode is stateless: the server does not issue `Mcp-Session-Id`, does not provide a standalone GET SSE stream, and handles each `POST /mcp` with a fresh MCP server instance. Both current MCP clients and 2025-era Streamable HTTP clients use that same URL. `GET /mcp` and `DELETE /mcp` return `405 Method Not Allowed`.
 
-The default bind is localhost-only (`127.0.0.1`) with Host header protection. Browser requests with a non-local `Origin` header are rejected.
+The default bind is localhost-only (`127.0.0.1`) with Host and Origin protection. Browser requests from allowed origins receive CORS response headers; other origins are rejected with `403 Forbidden`.
 
 The CLI handles `SIGINT` and `SIGTERM` gracefully. For example, `docker stop` sends `SIGTERM`; the server closes active MCP streams and then waits for the HTTP listener to stop before the process exits.
+
+## Docker
+
+Container images are published to GitHub Container Registry for both `linux/amd64` and `linux/arm64`.
+
+```bash
+docker run --rm -p 127.0.0.1:3000:3000 \
+  -e REDASH_URL=https://your-redash-instance.com \
+  -e REDASH_API_KEY=your_api_key \
+  ghcr.io/suthio/redash-mcp:latest
+```
+
+The container runs Streamable HTTP internally on `0.0.0.0:3000`, while the example publishes that port on the host's loopback interface only. Its default Host and Origin allowlists accept localhost access. When placing the container behind an authenticated reverse proxy or a private cluster service, set `MCP_HTTP_ALLOWED_HOSTS` and `MCP_HTTP_ALLOWED_ORIGINS` to the concrete DNS names used by clients.
+Published images are signed with keyless cosign.
 
 ## Available Tools
 
