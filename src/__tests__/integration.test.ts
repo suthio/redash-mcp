@@ -5,12 +5,8 @@
  * of the Redash MCP server.
  */
 
-// Set environment variables before any imports
-process.env.REDASH_URL = 'https://redash.example.com';
-process.env.REDASH_API_KEY = 'test-api-key';
-process.env.REDASH_TIMEOUT = '30000';
-
-import { redashClient, RedashClient } from '../redashClient.js';
+import axios from 'axios';
+import { getRedashClient, RedashClient } from '../redashClient.js';
 import { toolDefinitions } from '../index.js';
 import { logger } from '../logger.js';
 import { jest } from '@jest/globals';
@@ -33,7 +29,6 @@ describe('MCP Server Integration', () => {
       const errorSpy = jest.spyOn(logger, 'error');
 
       // Mock axios to throw an error
-      const axios = await import('axios');
       const mockedAxios = axios as any;
 
       if (mockedAxios.create) {
@@ -45,7 +40,7 @@ describe('MCP Server Integration', () => {
       }
 
       try {
-        await redashClient.getQueries();
+        await getRedashClient().getQueries();
       } catch (error) {
         // Expected to fail
       }

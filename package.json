@@ -20,12 +20,13 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/index.js dist/cli.js",
+    "clean": "node --eval \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm run clean && tsc && chmod +x dist/cli.js",
     "start": "node dist/cli.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "ts-node src/cli.ts",
     "test": "jest --passWithNoTests",
-    "inspector": "pnpm dlx @modelcontextprotocol/inspector node dist/index.js",
-    "inspector:headless": "BROWSER=none pnpm dlx @modelcontextprotocol/inspector node dist/index.js",
+    "inspector": "pnpm dlx @modelcontextprotocol/inspector node dist/cli.js",
+    "inspector:headless": "BROWSER=none pnpm dlx @modelcontextprotocol/inspector node dist/cli.js",
     "e2e:test": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
@@ -40,9 +41,12 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@hono/node-server": "^2.0.12",
+    "@modelcontextprotocol/hono": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "axios": "^1.19.0",
     "dotenv": "^17.4.2",
+    "hono": "^4.12.33",
     "socks-proxy-agent": "^8.0.5",
     "zod": "^4.4.3"
   },

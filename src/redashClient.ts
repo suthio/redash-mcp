@@ -1233,5 +1233,10 @@ export class RedashClient {
   }
 }
 
-// Export a singleton instance
-export const redashClient = new RedashClient();
+// Lazily created singleton so importing this module has no side effects;
+// environment variables are read on first use, not at import time.
+let instance: RedashClient | undefined;
+
+export function getRedashClient(): RedashClient {
+  return (instance ??= new RedashClient());
+}

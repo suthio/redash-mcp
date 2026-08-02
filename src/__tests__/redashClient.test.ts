@@ -1,8 +1,3 @@
-// Set environment variables before any imports
-process.env.REDASH_URL = 'https://redash.example.com';
-process.env.REDASH_API_KEY = 'test-api-key';
-process.env.REDASH_TIMEOUT = '30000';
-
 import { RedashClient } from '../redashClient.js';
 import axios from 'axios';
 import { jest } from '@jest/globals';

@@ -1,25 +1,11 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, type Transport } from "@modelcontextprotocol/server";
 import { jest } from "@jest/globals";
+import { createRedashMcpServer, startStdioServer, toolDefinitions } from "../index.js";
+import { getRedashClient } from "../redashClient.js";
 import { CLIENT_VERSION_MATRIX } from "./clientFixtures.js";
 
-type IndexModule = typeof import("../index.js");
-type RedashClientModule = typeof import("../redashClient.js");
-
-let createRedashMcpServer: IndexModule["createRedashMcpServer"];
-let startStdioServer: IndexModule["startStdioServer"];
-let redashClient: RedashClientModule["redashClient"];
-
-beforeAll(async () => {
-  process.env.REDASH_URL = "https://redash.example.com";
-  process.env.REDASH_API_KEY = "test-api-key";
-
-  const indexModule = await import("../index.js");
-  const redashClientModule = await import("../redashClient.js");
-  createRedashMcpServer = indexModule.createRedashMcpServer;
-  startStdioServer = indexModule.startStdioServer;
-  redashClient = redashClientModule.redashClient;
-});
+const redashClient = getRedashClient();
 
 describe("Redash MCP server", () => {
   let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
@@ -32,12 +18,16 @@ describe("Redash MCP server", () => {
     jest.restoreAllMocks();
   });
 
-  it("registers all 67 tools with descriptions and Zod-generated input schemas", async () => {
+  it("defines all 67 public tools", () => {
+    expect(toolDefinitions).toHaveLength(67);
+  });
+
+  it("registers every defined tool with descriptions and Zod-generated input schemas", async () => {
     const connection = await connectDirectClient();
 
     try {
       const result = await connection.client.listTools();
-      expect(result.tools).toHaveLength(67);
+      expect(result.tools).toHaveLength(toolDefinitions.length);
 
       const getQuery = result.tools.find((tool) => tool.name === "get_query");
       expect(getQuery?.description).toBe("Get details of a specific query");
@@ -135,7 +125,7 @@ describe("Redash MCP server", () => {
     try {
       await client.connect(clientTransport);
       const result = await client.listTools();
-      expect(result.tools).toHaveLength(67);
+      expect(result.tools).toHaveLength(toolDefinitions.length);
     } finally {
       await client.close();
       await handle.close();

@@ -1,3 +1,7 @@
+export function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Object.prototype.toString.call(value) === '[object Object]';
 }

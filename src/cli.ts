@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 import * as dotenv from 'dotenv';
-import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import * as path from 'path';
+import { runConfiguredServerCli } from './startup.js';
 
 // Check if .env file exists in current directory and load it
 const envPath = path.join(process.cwd(), '.env');
@@ -29,5 +29,4 @@ if (missingVars.length > 0) {
   process.exit(1);
 }
 
-// Run the MCP server
-import './index.js';
+await runConfiguredServerCli();
