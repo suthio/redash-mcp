@@ -1,7 +1,8 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as dotenv from 'dotenv';
 import { SocksProxyAgent } from 'socks-proxy-agent';
-import { logger } from './logger.js';
+import { logger, type LogFields } from './logger.js';
+import { isToolContentCaptureEnabled } from './telemetry.js';
 
 dotenv.config({ quiet: true });
 
@@ -111,6 +112,46 @@ export interface RedashDashboard {
     options: any;
     dashboard_id: number;
   }>;
+}
+
+class QueryExecutionFailedError extends Error {
+  constructor() {
+    super("Query execution failed");
+    this.name = "QueryExecutionFailedError";
+  }
+}
+
+function withCapturedRedashContent(fields: LogFields, content: LogFields): LogFields {
+  if (!isToolContentCaptureEnabled()) {
+    return fields;
+  }
+
+  return Object.fromEntries(
+    [...Object.entries(fields), ...Object.entries(content)]
+      .filter(([, value]) => value !== undefined),
+  );
+}
+
+function redashRequestErrorFields(
+  fields: LogFields,
+  error: unknown,
+  requestBody?: unknown,
+): LogFields {
+  const response = typeof error === "object" && error !== null && "response" in error
+    ? (error as { response?: { status?: unknown; data?: unknown } }).response
+    : undefined;
+  const statusCode = typeof response?.status === "number" ? response.status : undefined;
+
+  return withCapturedRedashContent(
+    {
+      ...fields,
+      ...(statusCode !== undefined ? { "http.response.status_code": statusCode } : {}),
+    },
+    {
+      "redash.request.body": requestBody,
+      "redash.response.body": response?.data,
+    },
+  );
 }
 
 export interface RedashSchema {
@@ -361,106 +402,108 @@ export class RedashClient {
       const response = await this.client.get(`/api/queries/${queryId}`);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching query ${queryId}:`, error);
+      logger.error(`Error fetching query ${queryId}`, { "redash.query.id": queryId }, error);
       throw new Error(`Failed to fetch query ${queryId} from Redash`);
     }
   }
 
   // Create a new query
   async createQuery(queryData: CreateQueryRequest): Promise<RedashQuery> {
+    const path = '/api/queries';
+    const requestData = {
+      name: queryData.name,
+      data_source_id: queryData.data_source_id,
+      query: queryData.query,
+      description: queryData.description || '',
+      options: queryData.options || {},
+      schedule: queryData.schedule || null,
+      tags: queryData.tags || []
+    };
+    const requestFields: LogFields = {
+      "http.request.method": "POST",
+      "url.path": path,
+      "redash.data_source.id": queryData.data_source_id,
+      "redash.request.header.names": Object.keys(this.client.defaults.headers || {}),
+    };
+
     try {
-      logger.info(`Creating new query: ${JSON.stringify(queryData)}`);
-      logger.info(`Sending request to: ${this.baseUrl}/api/queries`);
-
-      try {
-        // Ensure we're passing the exact parameters the Redash API expects
-        const requestData = {
-          name: queryData.name,
-          data_source_id: queryData.data_source_id,
-          query: queryData.query,
-          description: queryData.description || '',
-          options: queryData.options || {},
-          schedule: queryData.schedule || null,
-          tags: queryData.tags || []
-        };
-
-        logger.info(`Request data: ${JSON.stringify(requestData)}`);
-        // Avoid logging sensitive header values; log only header names
-        const headerNames = Object.keys((this.client.defaults as any).headers || {});
-        logger.info(`Request header names: ${JSON.stringify(headerNames)}`);
-        const response = await this.client.post('/api/queries', requestData);
-        logger.info(`Created query with ID: ${response.data.id}`);
-        return response.data;
-      } catch (axiosError: any) {
-        // Log detailed axios error information
-        logger.error(`Axios error in createQuery - Status: ${axiosError.response?.status || 'unknown'}`);
-        logger.error(`Response data: ${JSON.stringify(axiosError.response?.data || {}, null, 2)}`);
-        logger.error(`Request config: ${JSON.stringify({
-          url: axiosError.config?.url,
-          method: axiosError.config?.method,
-
-          data: axiosError.config?.data
-        }, null, 2)}`);
-
-        if (axiosError.response) {
-          throw new Error(`Redash API error (${axiosError.response.status}): ${JSON.stringify(axiosError.response.data)}`);
-        } else if (axiosError.request) {
-          throw new Error(`No response received from Redash API: ${axiosError.message}`);
-        } else {
-          throw axiosError;
-        }
-      }
+      logger.info("Creating Redash query", requestFields);
+      const response = await this.client.post(path, requestData);
+      logger.info("Created Redash query", {
+        ...requestFields,
+        "redash.query.id": response.data.id,
+      });
+      return response.data;
     } catch (error) {
-      logger.error(`Error creating query: ${error instanceof Error ? error.message : String(error)}`);
-      logger.error(`Stack trace: ${error instanceof Error && error.stack ? error.stack : 'No stack trace available'}`);
+      logger.error(
+        "Redash create-query request failed",
+        redashRequestErrorFields(requestFields, error, requestData),
+        error,
+      );
+
+      const axiosError = error as {
+        message?: string;
+        request?: unknown;
+        response?: { status?: unknown };
+      };
+      if (axiosError.response) {
+        throw new Error(`Failed to create query: Redash API error (${axiosError.response.status})`);
+      }
+      if (axiosError.request) {
+        throw new Error(`Failed to create query: No response received from Redash API: ${axiosError.message}`);
+      }
       throw new Error(`Failed to create query: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   // Update an existing query
   async updateQuery(queryId: number, queryData: UpdateQueryRequest): Promise<RedashQuery> {
+    const path = `/api/queries/${queryId}`;
+    const requestData: Record<string, any> = {};
+
+    if (queryData.name !== undefined) requestData.name = queryData.name;
+    if (queryData.data_source_id !== undefined) requestData.data_source_id = queryData.data_source_id;
+    if (queryData.query !== undefined) requestData.query = queryData.query;
+    if (queryData.description !== undefined) requestData.description = queryData.description;
+    if (queryData.options !== undefined) requestData.options = queryData.options;
+    if (queryData.schedule !== undefined) requestData.schedule = queryData.schedule;
+    if (queryData.tags !== undefined) requestData.tags = queryData.tags;
+    if (queryData.is_archived !== undefined) requestData.is_archived = queryData.is_archived;
+    if (queryData.is_draft !== undefined) requestData.is_draft = queryData.is_draft;
+
+    const requestFields: LogFields = {
+      "http.request.method": "POST",
+      "url.path": path,
+      "redash.query.id": queryId,
+      ...(queryData.data_source_id !== undefined
+        ? { "redash.data_source.id": queryData.data_source_id }
+        : {}),
+      "redash.request.header.names": Object.keys(this.client.defaults.headers || {}),
+    };
+
     try {
-      logger.debug(`Updating query ${queryId}: ${JSON.stringify(queryData)}`);
-
-      try {
-        // Construct a request payload with only the fields we want to update
-        const requestData: Record<string, any> = {};
-
-        if (queryData.name !== undefined) requestData.name = queryData.name;
-        if (queryData.data_source_id !== undefined) requestData.data_source_id = queryData.data_source_id;
-        if (queryData.query !== undefined) requestData.query = queryData.query;
-        if (queryData.description !== undefined) requestData.description = queryData.description;
-        if (queryData.options !== undefined) requestData.options = queryData.options;
-        if (queryData.schedule !== undefined) requestData.schedule = queryData.schedule;
-        if (queryData.tags !== undefined) requestData.tags = queryData.tags;
-        if (queryData.is_archived !== undefined) requestData.is_archived = queryData.is_archived;
-        if (queryData.is_draft !== undefined) requestData.is_draft = queryData.is_draft;
-
-        logger.debug(`Request data for update: ${JSON.stringify(requestData)}`);
-        const response = await this.client.post(`/api/queries/${queryId}`, requestData);
-        logger.debug(`Updated query ${queryId}`);
-        return response.data;
-      } catch (axiosError: any) {
-        // Log detailed axios error information
-        logger.error(`Axios error in updateQuery - Status: ${axiosError.response?.status || 'unknown'}`);
-        logger.error(`Response data: ${JSON.stringify(axiosError.response?.data || {}, null, 2)}`);
-        logger.error(`Request config: ${JSON.stringify({
-          url: axiosError.config?.url,
-          method: axiosError.config?.method,
-
-          data: axiosError.config?.data
-        }, null, 2)}`);
-
-        if (axiosError.response) {
-          throw new Error(`Redash API error (${axiosError.response.status}): ${JSON.stringify(axiosError.response.data)}`);
-        } else if (axiosError.request) {
-          throw new Error(`No response received from Redash API: ${axiosError.message}`);
-        } else {
-          throw axiosError;
-        }
-      }
+      logger.debug(`Updating query ${queryId}`, requestFields);
+      const response = await this.client.post(path, requestData);
+      logger.debug(`Updated query ${queryId}`, requestFields);
+      return response.data;
     } catch (error) {
-      logger.error(`Error updating query ${queryId}: ${error}`);
+      logger.error(
+        "Redash update-query request failed",
+        redashRequestErrorFields(requestFields, error, requestData),
+        error,
+      );
+
+      const axiosError = error as {
+        message?: string;
+        request?: unknown;
+        response?: { status?: unknown };
+      };
+      if (axiosError.response) {
+        throw new Error(`Failed to update query ${queryId}: Redash API error (${axiosError.response.status})`);
+      }
+      if (axiosError.request) {
+        throw new Error(`Failed to update query ${queryId}: No response received from Redash API: ${axiosError.message}`);
+      }
       throw new Error(`Failed to update query ${queryId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -491,8 +534,18 @@ export class RedashClient {
 
   // Execute a query and return results
   async executeQuery(queryId: number, parameters?: Record<string, any>, maxAge?: number): Promise<RedashQueryResult> {
+    const path = `/api/queries/${queryId}/results`;
+    const requestData = { parameters, max_age: maxAge };
+    const requestFields: LogFields = {
+      "http.request.method": "POST",
+      "url.path": path,
+      "redash.query.id": queryId,
+      ...(maxAge !== undefined ? { "redash.query.max_age": maxAge } : {}),
+    };
+
     try {
-      const response = await this.client.post(`/api/queries/${queryId}/results`, { parameters, max_age: maxAge });
+      logger.debug("Executing Redash query", requestFields);
+      const response = await this.client.post(path, requestData);
 
       if (response.data.job) {
         // Query is being executed asynchronously, poll for results
@@ -503,14 +556,16 @@ export class RedashClient {
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const axiosError = error as AxiosError;
-        logger.error(`Error executing query ${queryId}: ${axiosError.message}`);
+        logger.error(
+          "Redash query-execution request failed",
+          redashRequestErrorFields(requestFields, axiosError, requestData),
+          axiosError,
+        );
 
         // Extract detailed error information
         if (axiosError.response) {
           const statusCode = axiosError.response.status;
-          const errorData = axiosError.response.data as any;
-          const errorMessage = errorData?.message || errorData?.error || JSON.stringify(errorData);
-          throw new Error(`Failed to execute query ${queryId}: Redash API error (${statusCode}): ${errorMessage}`);
+          throw new Error(`Failed to execute query ${queryId}: Redash API error (${statusCode})`);
         } else if (axiosError.request) {
           throw new Error(`Failed to execute query ${queryId}: No response received from Redash API: ${axiosError.message}`);
         } else {
@@ -519,7 +574,7 @@ export class RedashClient {
       } else {
         // Handle non-axios errors
         const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error(`Error executing query ${queryId}: ${errorMessage}`);
+        logger.error("Error executing Redash query", requestFields, error);
         throw new Error(`Failed to execute query ${queryId}: ${errorMessage}`);
       }
     }
@@ -528,10 +583,16 @@ export class RedashClient {
   // Poll for query execution results
   private async pollQueryResults(jobId: string, timeout = 60000, interval = 1000): Promise<RedashQueryResult> {
     const startTime = Date.now();
+    const path = `/api/jobs/${jobId}`;
+    const requestFields: LogFields = {
+      "http.request.method": "GET",
+      "url.path": path,
+      "redash.job.id": jobId,
+    };
 
     while (Date.now() - startTime < timeout) {
       try {
-        const response = await this.client.get(`/api/jobs/${jobId}`);
+        const response = await this.client.get(path);
 
         if (response.data.job.status === 3) { // Completed
           // Check if we have a query_result_id (for adhoc queries)
@@ -543,28 +604,35 @@ export class RedashClient {
           // Otherwise, return the result directly (for normal queries)
           return response.data.job.result;
         } else if (response.data.job.status === 4) { // Error
-          const errorDetails = response.data.job.error || 'Unknown error';
-          throw new Error(`Query execution failed: ${errorDetails}`);
+          logger.error(
+            "Redash query job failed",
+            withCapturedRedashContent(requestFields, {
+              "redash.job.error": response.data.job.error,
+            }),
+          );
+          throw new QueryExecutionFailedError();
         }
 
         // Wait for the next poll
         await new Promise(resolve => setTimeout(resolve, interval));
       } catch (error) {
         // If this is our own error from status 4, re-throw it as-is
-        if (error instanceof Error && error.message.startsWith('Query execution failed:')) {
+        if (error instanceof QueryExecutionFailedError) {
           throw error;
         }
 
         if (axios.isAxiosError(error)) {
           const axiosError = error as AxiosError;
-          logger.error(`Error polling for query results (job ${jobId}): ${axiosError.message}`);
+          logger.error(
+            "Redash query-result polling request failed",
+            redashRequestErrorFields(requestFields, axiosError),
+            axiosError,
+          );
 
           // Extract detailed error information
           if (axiosError.response) {
             const statusCode = axiosError.response.status;
-            const errorData = axiosError.response.data as any;
-            const errorMessage = errorData?.message || errorData?.error || JSON.stringify(errorData);
-            throw new Error(`Failed to poll for query results (job ${jobId}): Redash API error (${statusCode}): ${errorMessage}`);
+            throw new Error(`Failed to poll for query results (job ${jobId}): Redash API error (${statusCode})`);
           } else if (axiosError.request) {
             throw new Error(`Failed to poll for query results (job ${jobId}): No response received from Redash API: ${axiosError.message}`);
           } else {
@@ -573,7 +641,7 @@ export class RedashClient {
         } else {
           // Handle non-axios errors
           const errorMessage = error instanceof Error ? error.message : String(error);
-          logger.error(`Error polling for query results (job ${jobId}): ${errorMessage}`);
+          logger.error("Error polling for Redash query results", requestFields, error);
           throw new Error(`Failed to poll for query results (job ${jobId}): ${errorMessage}`);
         }
       }
@@ -596,7 +664,7 @@ export class RedashClient {
         results: response.data.results
       };
     } catch (error) {
-      console.error('Error fetching dashboards:', error);
+      logger.error("Error fetching dashboards", undefined, error);
       throw new Error('Failed to fetch dashboards from Redash');
     }
   }
@@ -607,7 +675,7 @@ export class RedashClient {
       const response = await this.client.get(`/api/dashboards/${dashboardId}`);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching dashboard ${dashboardId}:`, error);
+      logger.error(`Error fetching dashboard ${dashboardId}`, { "redash.dashboard.id": dashboardId }, error);
       throw new Error(`Failed to fetch dashboard ${dashboardId} from Redash`);
     }
   }
@@ -631,29 +699,33 @@ export class RedashClient {
       const response = await this.client.get(`/api/visualizations/${visualizationId}`);
       return response.data;
     } catch (error) {
-      console.error(`Error fetching visualization ${visualizationId}:`, error);
+      logger.error(`Error fetching visualization ${visualizationId}`, { "redash.visualization.id": visualizationId }, error);
       throw new Error(`Failed to fetch visualization ${visualizationId} from Redash`);
     }
   }
 
   // Execute adhoc query directly using /api/query_results endpoint
   async executeAdhocQuery(query: string, dataSourceId: number, applyAutoLimit = true): Promise<RedashQueryResult> {
+    const path = '/api/query_results';
+    const payload = {
+      query: query,
+      data_source_id: dataSourceId,
+      max_age: 0,  // Force fresh results (no cache)
+      apply_auto_limit: applyAutoLimit,  // MSSQL data sources must set this to false (LIMIT is invalid T-SQL)
+      parameters: {}
+    };
+    const requestFields: LogFields = {
+      "http.request.method": "POST",
+      "url.path": path,
+      "redash.data_source.id": dataSourceId,
+      "redash.query.apply_auto_limit": applyAutoLimit,
+    };
+
     try {
-      logger.info(`Executing adhoc query: ${query.substring(0, 100)}...`);
-
-      // Prepare the request payload
-      const payload = {
-        query: query,
-        data_source_id: dataSourceId,
-        max_age: 0,  // Force fresh results (no cache)
-        apply_auto_limit: applyAutoLimit,  // MSSQL data sources must set this to false (LIMIT is invalid T-SQL)
-        parameters: {}
-      };
-
-      logger.debug(`Sending adhoc query request: ${JSON.stringify(payload)}`);
+      logger.info("Executing Redash ad hoc query", requestFields);
 
       // Execute the query directly without creating a query object
-      const response = await this.client.post('/api/query_results', payload);
+      const response = await this.client.post(path, payload);
 
       // Handle async execution if job is returned
       if (response.data.job) {
@@ -664,7 +736,11 @@ export class RedashClient {
       return response.data;
 
     } catch (error) {
-      logger.error(`Error executing adhoc query: ${error}`);
+      logger.error(
+        "Redash ad hoc-query request failed",
+        redashRequestErrorFields(requestFields, error, payload),
+        error,
+      );
       throw new Error(`Failed to execute adhoc query: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -675,7 +751,7 @@ export class RedashClient {
       const response = await this.client.post('/api/visualizations', data);
       return response.data;
     } catch (error) {
-      console.error('Error creating visualization:', error);
+      logger.error("Error creating visualization", undefined, error);
       throw new Error('Failed to create visualization');
     }
   }
@@ -686,7 +762,7 @@ export class RedashClient {
       const response = await this.client.post(`/api/visualizations/${visualizationId}`, data);
       return response.data;
     } catch (error) {
-      console.error(`Error updating visualization ${visualizationId}:`, error);
+      logger.error(`Error updating visualization ${visualizationId}`, { "redash.visualization.id": visualizationId }, error);
       throw new Error(`Failed to update visualization ${visualizationId}`);
     }
   }
@@ -696,22 +772,30 @@ export class RedashClient {
     try {
       await this.client.delete(`/api/visualizations/${visualizationId}`);
     } catch (error) {
-      console.error(`Error deleting visualization ${visualizationId}:`, error);
+      logger.error(`Error deleting visualization ${visualizationId}`, { "redash.visualization.id": visualizationId }, error);
       throw new Error(`Failed to delete visualization ${visualizationId}`);
     }
   }
 
   // Get query results as CSV
   async getQueryResultsAsCsv(queryId: number, refresh = false): Promise<string> {
+    const path = `/api/queries/${queryId}/results.csv`;
+    const requestFields: LogFields = {
+      "http.request.method": "GET",
+      "url.path": path,
+      "redash.query.id": queryId,
+      "redash.query.refresh": refresh,
+    };
+
     try {
       // Optionally refresh the query before fetching results
       if (refresh) {
-        logger.debug(`Refreshing query ${queryId} before fetching CSV results`);
+        logger.debug(`Refreshing query ${queryId} before fetching CSV results`, requestFields);
         await this.executeQuery(queryId);
       }
 
-      logger.debug(`Fetching CSV results for query ${queryId}`);
-      const response = await this.client.get(`/api/queries/${queryId}/results.csv`, {
+      logger.debug(`Fetching CSV results for query ${queryId}`, requestFields);
+      const response = await this.client.get(path, {
         responseType: 'text'
       });
 
@@ -719,12 +803,15 @@ export class RedashClient {
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const axiosError = error as AxiosError;
-        logger.error(`Error fetching CSV results for query ${queryId}: ${axiosError.message}`);
+        logger.error(
+          "Redash CSV-results request failed",
+          redashRequestErrorFields(requestFields, axiosError),
+          axiosError,
+        );
 
         if (axiosError.response) {
           const statusCode = axiosError.response.status;
-          const errorData = axiosError.response.data;
-          throw new Error(`Failed to fetch CSV results for query ${queryId}: Redash API error (${statusCode}): ${errorData}`);
+          throw new Error(`Failed to fetch CSV results for query ${queryId}: Redash API error (${statusCode})`);
         } else if (axiosError.request) {
           throw new Error(`Failed to fetch CSV results for query ${queryId}: No response received from Redash API: ${axiosError.message}`);
         } else {
@@ -732,7 +819,7 @@ export class RedashClient {
         }
       } else {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error(`Error fetching CSV results for query ${queryId}: ${errorMessage}`);
+        logger.error("Error fetching Redash CSV results", requestFields, error);
         throw new Error(`Failed to fetch CSV results for query ${queryId}: ${errorMessage}`);
       }
     }
@@ -746,10 +833,9 @@ export class RedashClient {
       );
       return response.data;
     } catch (error) {
-      console.error(
-        `Error fetching data source ${dataSourceId} schema:`,
-        error
-      );
+      logger.error(`Error fetching data source ${dataSourceId} schema`, {
+        "redash.data_source.id": dataSourceId,
+      }, error);
       throw new Error(
         `Failed to fetch data source ${dataSourceId} schema from Redash`
       );
@@ -1233,8 +1319,8 @@ export class RedashClient {
   }
 }
 
-// Lazily created singleton so importing this module has no side effects;
-// environment variables are read on first use, not at import time.
+// Lazily create the client so credentials are validated on first use rather
+// than when dotenv is loaded during module import.
 let instance: RedashClient | undefined;
 
 export function getRedashClient(): RedashClient {
