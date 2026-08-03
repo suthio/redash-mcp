@@ -2177,7 +2177,7 @@ export const toolDefinitions = [
   defineTool("get_visualization", "Get details of a specific visualization", getVisualization, getVisualizationSchema),
   defineTool(
     "execute_adhoc_query",
-    "Execute an ad-hoc query without saving it to Redash. Creates a temporary query that is automatically deleted after execution.",
+    "Execute a one-off query without saving it to Redash.",
     executeAdhocQuery,
     executeAdhocQuerySchema,
   ),
