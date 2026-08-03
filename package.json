@@ -84,6 +84,8 @@
     "dotenv": "^17.4.2",
     "hono": "^4.12.33",
     "socks-proxy-agent": "^8.0.5",
+    "stream-chain": "^4.2.5",
+    "stream-json": "^3.5.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
