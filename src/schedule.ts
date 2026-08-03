@@ -1,12 +1,18 @@
 import { z } from 'zod';
 
-// Schedule schema with day_of_week defaulting to null
-// day_of_week uses full English names: "Monday", "Tuesday", etc.
+const dayOfWeekEnum = z.enum([
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+  'Thursday', 'Friday', 'Saturday',
+]);
+
+// Schedule schema with day_of_week, time, and until defaulting to null.
+// Redash's scheduler indexes these keys directly, so they must always
+// be present in the stored JSON (even as null).
 // interval is in seconds (e.g., 86400 = daily, 604800 = weekly)
 export const scheduleSchema = z.object({
   interval: z.number(),
-  time: z.string().nullable().optional(),
-  until: z.string().nullable().optional(),
-  day_of_week: z.string().nullable().default(null),
+  time: z.string().nullable().default(null),
+  until: z.string().nullable().default(null),
+  day_of_week: dayOfWeekEnum.nullable().default(null),
   disabled: z.boolean().optional(),
 }).optional().nullable();

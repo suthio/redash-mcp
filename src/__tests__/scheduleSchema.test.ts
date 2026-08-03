@@ -1,16 +1,14 @@
 import { scheduleSchema } from '../schedule.js';
 
 describe('scheduleSchema', () => {
-  it('should default day_of_week to null when omitted', () => {
+  it('should default day_of_week, time, and until to null when omitted', () => {
     const result = scheduleSchema.parse({
       interval: 86400,
-      time: '01:15',
-      until: '2026-08-14',
     });
     expect(result).toEqual({
       interval: 86400,
-      time: '01:15',
-      until: '2026-08-14',
+      time: null,
+      until: null,
       day_of_week: null,
     });
   });
@@ -27,6 +25,21 @@ describe('scheduleSchema', () => {
     });
   });
 
+  it('should accept all valid day_of_week values', () => {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    for (const day of days) {
+      const result = scheduleSchema.parse({ interval: 604800, day_of_week: day });
+      expect(result).toMatchObject({ day_of_week: day });
+    }
+  });
+
+  it('should reject invalid day_of_week string', () => {
+    expect(() => scheduleSchema.parse({
+      interval: 604800,
+      day_of_week: 'monday',
+    })).toThrow();
+  });
+
   it('should preserve day_of_week as null when explicitly set to null', () => {
     const result = scheduleSchema.parse({
       interval: 86400,
@@ -34,6 +47,20 @@ describe('scheduleSchema', () => {
     });
     expect(result).toMatchObject({
       interval: 86400,
+      day_of_week: null,
+    });
+  });
+
+  it('should preserve time and until when provided', () => {
+    const result = scheduleSchema.parse({
+      interval: 86400,
+      time: '01:15',
+      until: '2026-08-14',
+    });
+    expect(result).toEqual({
+      interval: 86400,
+      time: '01:15',
+      until: '2026-08-14',
       day_of_week: null,
     });
   });
