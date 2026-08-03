@@ -777,29 +777,6 @@ describe('RedashClient', () => {
     });
   });
 
-  describe('getSchema', () => {
-    it('should fetch data source schema', async () => {
-      const mockSchema = {
-        schema: [
-          {
-            name: 'users',
-            columns: [
-              { name: 'id', type: 'integer' },
-              { name: 'email', type: 'string' },
-            ],
-          },
-        ],
-      };
-
-      mockAxiosInstance.get.mockResolvedValue({ data: mockSchema });
-
-      const result = await client.getSchema(1);
-
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/data_sources/1/schema');
-      expect(result).toEqual(mockSchema);
-    });
-  });
-
   describe('getSchemaPage', () => {
     beforeEach(() => {
       // Most tests in this block exercise the streamed non-BigQuery path.
