@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.0.15](https://github.com/suthio/redash-mcp/compare/v0.0.14...v0.0.15) - 2026-08-03
+
+- Add npm metadata for source and issues by @wowsofine in https://github.com/suthio/redash-mcp/pull/61
+- Allow disabling apply_auto_limit in execute_adhoc_query (fixes #58) by @suthio in https://github.com/suthio/redash-mcp/pull/59
+- chore(deps): bump actions/setup-node from 4 to 6 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/44
+- Refresh security-sensitive runtime dependencies by @suthio in https://github.com/suthio/redash-mcp/pull/71
+- chore(deps): bump actions/checkout from 4 to 6 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/45
+- Make npm publishing single-path and rerunnable by @suthio in https://github.com/suthio/redash-mcp/pull/72
+- Publish npm releases with trusted OIDC by @suthio in https://github.com/suthio/redash-mcp/pull/73
+- Preserve the CLI entry with npm 11 by @suthio in https://github.com/suthio/redash-mcp/pull/74
+- fix: normalize repository metadata before npm publish by @suthio in https://github.com/suthio/redash-mcp/pull/75
+- Migrate package management to pnpm by @kahirokunn in https://github.com/suthio/redash-mcp/pull/62
+- fix: add type-safe schedule schema with day_of_week default by @ryo-imai-bit in https://github.com/suthio/redash-mcp/pull/69
+- Add streamable HTTP transport by @kahirokunn in https://github.com/suthio/redash-mcp/pull/63
+- Add OpenTelemetry observability by @kahirokunn in https://github.com/suthio/redash-mcp/pull/76
+
 ## [v0.0.14](https://github.com/suthio/redash-mcp/compare/v0.0.13...v0.0.14) - 2026-07-31
 - Add tools for query parameters, widget layout, and chart config by @noaahh in https://github.com/suthio/redash-mcp/pull/57
 
