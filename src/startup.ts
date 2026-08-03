@@ -12,7 +12,7 @@ export const SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM"] as const;
 export type ShutdownSignal = (typeof SHUTDOWN_SIGNALS)[number];
 
 export interface ShutdownSignalTarget {
-  exitCode?: number | string;
+  exitCode?: number | string | null;
   once(signal: ShutdownSignal, listener: () => void): unknown;
   off(signal: ShutdownSignal, listener: () => void): unknown;
 }

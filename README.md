@@ -21,7 +21,7 @@ Model Context Protocol (MCP) server for integrating Redash with AI assistants li
 
 ## Prerequisites
 
-- Node.js (v20 or later)
+- Node.js (v22 or later)
 - pnpm
 - Access to a Redash instance
 - Redash API key
