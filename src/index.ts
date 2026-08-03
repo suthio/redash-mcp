@@ -1,76 +1,87 @@
 #!/usr/bin/env node
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema
-} from "@modelcontextprotocol/sdk/types.js";
-import { z, type ZodTypeAny } from "zod";
+  McpServer,
+  ResourceTemplate,
+  type CallToolResult,
+  type Variables,
+} from "@modelcontextprotocol/server";
+import { serveStdio, type ServeStdioOptions, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
+import { z, type ZodObject, type ZodRawShape } from "zod";
 import * as dotenv from 'dotenv';
-import { redashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
+import { getRedashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { buildChartVisualizationOptions, chartVisualizationUpdateSchema } from "./chartVisualization.js";
 import { mergeNamedEntries, queryParameterPatchSchema, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema } from "./parameterManagement.js";
-import { buildInputSchema, type JsonSchemaDescriptionMap } from "./jsonSchema.js";
 import { buildParameterizedExecutionParameters, ParameterizedExecutionError } from "./parameterizedExecution.js";
 import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
-import { logger, LogLevel } from "./logger.js";
+import { logger } from "./logger.js";
 import { scheduleSchema } from './schedule.js';
 
 // Load environment variables
 dotenv.config({ quiet: true });
 
-// Create MCP server instance
-const server = new Server(
-  {
-    name: "redash-mcp",
-    version: "1.1.0"
-  },
-  {
-    capabilities: {
-      tools: {},
-      resources: {}
-    }
-  }
-);
-
-// Set up server logging
-logger.info('Starting Redash MCP server...');
-
 const emptyInputSchema = z.object({});
 
-function defineTool(
+interface JsonSchemaConverter {
+  input: (options: { target: string }) => Record<string, unknown>;
+  output: (options: { target: string }) => Record<string, unknown>;
+}
+
+// The stateless HTTP transport builds a fresh McpServer per request, and
+// registerTool eagerly converts each input schema to JSON Schema. The schemas
+// are immutable module-level constants, so memoize the conversion per schema.
+function cacheJsonSchemaConversion<T extends ZodRawShape>(schema: ZodObject<T>): ZodObject<T> {
+  const std = schema["~standard"] as { jsonSchema?: JsonSchemaConverter };
+  const converter = std.jsonSchema;
+  if (!converter) {
+    return schema;
+  }
+
+  const cachedByTarget = new Map<string, Record<string, unknown>>();
+  std.jsonSchema = {
+    input: (options) => {
+      let converted = cachedByTarget.get(options.target);
+      if (!converted) {
+        converted = converter.input(options);
+        cachedByTarget.set(options.target, converted);
+      }
+      return converted;
+    },
+    output: (options) => converter.output(options),
+  };
+
+  return schema;
+}
+
+function defineTool<T extends ZodRawShape>(
   name: string,
   description: string,
-  schema: ZodTypeAny = emptyInputSchema,
-  schemaDescriptions: JsonSchemaDescriptionMap = {}
+  handler: (args: z.output<ZodObject<T>>) => Promise<unknown>,
+  schema: ZodObject<T> = emptyInputSchema as ZodObject<T>,
 ) {
   return {
     name,
     description,
-    inputSchema: buildInputSchema(schema, schemaDescriptions),
+    inputSchema: cacheJsonSchemaConversion(schema),
+    handler: handler as (args: Record<string, unknown>) => Promise<unknown>,
   };
 }
 
-const paginationSchemaDescriptions = {
-  page: "Page number (starts at 1)",
-  pageSize: "Number of results per page",
-} satisfies JsonSchemaDescriptionMap;
+const paginationPageField = z.coerce.number().optional().default(1).describe("Page number (starts at 1)");
+const paginationPageSizeField = z.coerce.number().optional().default(25).describe("Number of results per page");
 
 // ----- Tools Implementation -----
 
 // Tool: get_query
 const getQuerySchema = z.object({
-  queryId: z.coerce.number()
+  queryId: z.coerce.number().describe("ID of the query to get")
 });
 
 async function getQuery(params: z.infer<typeof getQuerySchema>) {
   try {
     const { queryId } = params;
-    const query = await redashClient.getQuery(queryId);
+    const query = await getRedashClient().getQuery(queryId);
 
     return {
       content: [
@@ -96,13 +107,13 @@ async function getQuery(params: z.infer<typeof getQuerySchema>) {
 
 // Tool: create_query
 const createQuerySchema = z.object({
-  name: z.string(),
-  data_source_id: z.coerce.number(),
-  query: z.string(),
-  description: z.string().optional(),
-  options: z.record(z.any()).optional(),
-  schedule: scheduleSchema,
-  tags: z.array(z.string()).optional()
+  name: z.string().describe("Name of the query"),
+  data_source_id: z.coerce.number().describe("ID of the data source to use"),
+  query: z.string().describe("SQL query text"),
+  description: z.string().optional().describe("Description of the query"),
+  options: z.record(z.string(), z.any()).optional().describe("Query options"),
+  schedule: scheduleSchema.describe("Query schedule"),
+  tags: z.array(z.string()).optional().describe("Tags for the query")
 });
 
 async function createQuery(params: z.infer<typeof createQuerySchema>) {
@@ -121,7 +132,7 @@ async function createQuery(params: z.infer<typeof createQuerySchema>) {
     };
 
     logger.debug(`Calling redashClient.createQuery with data: ${JSON.stringify(queryData)}`);
-    const result = await redashClient.createQuery(queryData);
+    const result = await getRedashClient().createQuery(queryData);
     logger.debug(`Create query result: ${JSON.stringify(result)}`);
 
     return {
@@ -148,16 +159,16 @@ async function createQuery(params: z.infer<typeof createQuerySchema>) {
 
 // Tool: update_query
 const updateQuerySchema = z.object({
-  queryId: z.coerce.number(),
-  name: z.string().optional(),
-  data_source_id: z.coerce.number().optional(),
-  query: z.string().optional(),
-  description: z.string().optional(),
-  options: z.record(z.any()).optional(),
-  schedule: scheduleSchema,
-  tags: z.array(z.string()).optional(),
-  is_archived: z.boolean().optional(),
-  is_draft: z.boolean().optional()
+  queryId: z.coerce.number().describe("ID of the query to update"),
+  name: z.string().optional().describe("New name of the query"),
+  data_source_id: z.coerce.number().optional().describe("ID of the data source to use"),
+  query: z.string().optional().describe("SQL query text"),
+  description: z.string().optional().describe("Description of the query"),
+  options: z.record(z.string(), z.any()).optional().describe("Query options"),
+  schedule: scheduleSchema.describe("Query schedule"),
+  tags: z.array(z.string()).optional().describe("Tags for the query"),
+  is_archived: z.boolean().optional().describe("Whether the query is archived"),
+  is_draft: z.boolean().optional().describe("Whether the query is a draft")
 });
 
 async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
@@ -181,7 +192,7 @@ async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
     if (updateData.is_draft !== undefined) queryData.is_draft = updateData.is_draft;
 
     logger.debug(`Calling redashClient.updateQuery with data: ${JSON.stringify(queryData)}`);
-    const result = await redashClient.updateQuery(queryId, queryData);
+    const result = await getRedashClient().updateQuery(queryId, queryData);
     logger.debug(`Update query result: ${JSON.stringify(result)}`);
 
     return {
@@ -208,12 +219,12 @@ async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
 
 // Tool: get_query_parameters
 const getQueryParametersSchema = z.object({
-  queryId: z.coerce.number()
+  queryId: z.coerce.number().describe("ID of the query")
 });
 
 async function getQueryParameters(params: z.infer<typeof getQueryParametersSchema>) {
   try {
-    const query = await redashClient.getQuery(params.queryId);
+    const query = await getRedashClient().getQuery(params.queryId);
     const queryOptions = query.options || {};
 
     return {
@@ -248,15 +259,15 @@ async function getQueryParameters(params: z.infer<typeof getQueryParametersSchem
 
 // Tool: update_query_parameters
 const updateQueryParametersSchema = z.object({
-  queryId: z.coerce.number(),
-  parameters: z.array(queryParameterPatchSchema).default([]),
-  removeParameterNames: z.array(z.string()).optional(),
-  replaceParameters: z.boolean().optional()
+  queryId: z.coerce.number().describe("ID of the query"),
+  parameters: z.array(queryParameterPatchSchema).default([]).describe("Parameter definitions to merge into the query"),
+  removeParameterNames: z.array(z.string()).optional().describe("Saved parameter names to remove from the query"),
+  replaceParameters: z.boolean().optional().describe("Replace the stored parameter list instead of merging")
 });
 
 async function updateQueryParameters(params: z.infer<typeof updateQueryParametersSchema>) {
   try {
-    const query = await redashClient.getQuery(params.queryId);
+    const query = await getRedashClient().getQuery(params.queryId);
     const queryOptions = query.options || {};
     const existingParameters = Array.isArray(queryOptions.parameters) ? queryOptions.parameters : [];
     const updatedParameters = mergeNamedEntries(existingParameters, params.parameters, {
@@ -270,7 +281,7 @@ async function updateQueryParameters(params: z.infer<typeof updateQueryParameter
       })
     };
 
-    const result = await redashClient.updateQuery(params.queryId, updateData);
+    const result = await getRedashClient().updateQuery(params.queryId, updateData);
 
     return {
       content: [
@@ -296,13 +307,13 @@ async function updateQueryParameters(params: z.infer<typeof updateQueryParameter
 
 // Tool: archive_query
 const archiveQuerySchema = z.object({
-  queryId: z.coerce.number()
+  queryId: z.coerce.number().describe("ID of the query to archive")
 });
 
 async function archiveQuery(params: z.infer<typeof archiveQuerySchema>) {
   try {
     const { queryId } = params;
-    const result = await redashClient.archiveQuery(queryId);
+    const result = await getRedashClient().archiveQuery(queryId);
 
     return {
       content: [
@@ -329,7 +340,7 @@ async function archiveQuery(params: z.infer<typeof archiveQuerySchema>) {
 // Tool: list_data_sources
 async function listDataSources() {
   try {
-    const dataSources = await redashClient.getDataSources();
+    const dataSources = await getRedashClient().getDataSources();
 
     return {
       content: [
@@ -355,15 +366,15 @@ async function listDataSources() {
 
 // Tool: list_queries
 const listQueriesSchema = z.object({
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25),
-  q: z.string().optional()
+  page: paginationPageField,
+  pageSize: paginationPageSizeField,
+  q: z.string().optional().describe("Search query")
 });
 
 async function listQueries(params: z.infer<typeof listQueriesSchema>) {
   try {
     const { page, pageSize, q } = params;
-    const queries = await redashClient.getQueries(page, pageSize, q);
+    const queries = await getRedashClient().getQueries(page, pageSize, q);
 
     logger.debug(`Listed ${queries.results.length} queries`);
     return {
@@ -390,15 +401,15 @@ async function listQueries(params: z.infer<typeof listQueriesSchema>) {
 
 // Tool: execute_query
 const executeQuerySchema = z.object({
-  queryId: z.coerce.number(),
-  parameters: z.record(z.any()).optional(),
-  maxAge: z.coerce.number().optional()
+  queryId: z.coerce.number().describe("ID of the query to execute"),
+  parameters: z.record(z.string(), z.any()).optional().describe("Parameters to pass to the query (if any)"),
+  maxAge: z.coerce.number().optional().describe("Cache age in seconds. Use 0 to force a fresh execution.")
 });
 
 async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
   try {
     const { queryId, parameters, maxAge } = params;
-    const result = await redashClient.executeQuery(queryId, parameters, maxAge);
+    const result = await getRedashClient().executeQuery(queryId, parameters, maxAge);
 
     return {
       content: [
@@ -424,22 +435,22 @@ async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
 
 // Tool: execute_parameterized_query
 const executeParameterizedQuerySchema = z.object({
-  queryId: z.coerce.number(),
-  parameters: z.record(z.any()).optional().default({}),
-  useSavedDefaults: z.boolean().optional().default(true),
-  maxAge: z.coerce.number().optional()
+  queryId: z.coerce.number().describe("ID of the query to execute"),
+  parameters: z.record(z.string(), z.any()).optional().default({}).describe("Explicit parameter values to coerce using the saved Redash parameter definitions"),
+  useSavedDefaults: z.boolean().optional().default(true).describe("Apply saved default parameter values when a parameter is omitted"),
+  maxAge: z.coerce.number().optional().describe("Cache age in seconds. Use 0 to force a fresh execution.")
 });
 
 async function executeParameterizedQuery(params: z.infer<typeof executeParameterizedQuerySchema>) {
   let effectiveParameters: Record<string, unknown> | undefined;
 
   try {
-    const query = await redashClient.getQuery(params.queryId);
+    const query = await getRedashClient().getQuery(params.queryId);
     const parameterDefinitions = Array.isArray(query.options?.parameters) ? query.options.parameters : [];
     effectiveParameters = buildParameterizedExecutionParameters(parameterDefinitions, params.parameters, {
       useSavedDefaults: params.useSavedDefaults
     });
-    const result = await redashClient.executeQuery(params.queryId, effectiveParameters, params.maxAge);
+    const result = await getRedashClient().executeQuery(params.queryId, effectiveParameters, params.maxAge);
 
     return {
       content: [
@@ -482,14 +493,14 @@ async function executeParameterizedQuery(params: z.infer<typeof executeParameter
 
 // Tool: get_query_results_csv
 const getQueryResultsCsvSchema = z.object({
-  queryId: z.coerce.number(),
-  refresh: z.boolean().optional().default(false)
+  queryId: z.coerce.number().describe("ID of the query to get results from"),
+  refresh: z.boolean().optional().default(false).describe("Whether to refresh the query before fetching results to ensure latest data (default: false)")
 });
 
 async function getQueryResultsCsv(params: z.infer<typeof getQueryResultsCsvSchema>) {
   try {
     const { queryId, refresh } = params;
-    const csv = await redashClient.getQueryResultsAsCsv(queryId, refresh);
+    const csv = await getRedashClient().getQueryResultsAsCsv(queryId, refresh);
 
     return {
       content: [
@@ -515,14 +526,14 @@ async function getQueryResultsCsv(params: z.infer<typeof getQueryResultsCsvSchem
 
 // Tool: list_dashboards
 const listDashboardsSchema = z.object({
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25)
+  page: paginationPageField,
+  pageSize: paginationPageSizeField
 });
 
 async function listDashboards(params: z.infer<typeof listDashboardsSchema>) {
   try {
     const { page, pageSize } = params;
-    const dashboards = await redashClient.getDashboards(page, pageSize);
+    const dashboards = await getRedashClient().getDashboards(page, pageSize);
 
     return {
       content: [
@@ -548,13 +559,13 @@ async function listDashboards(params: z.infer<typeof listDashboardsSchema>) {
 
 // Tool: get_dashboard
 const getDashboardSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to get")
 });
 
 async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
   try {
     const { dashboardId } = params;
-    const dashboard = await redashClient.getDashboard(dashboardId);
+    const dashboard = await getRedashClient().getDashboard(dashboardId);
 
     return {
       content: [
@@ -580,12 +591,12 @@ async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
 
 // Tool: get_dashboard_layout
 const getDashboardLayoutSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard")
 });
 
 async function getDashboardLayout(params: z.infer<typeof getDashboardLayoutSchema>) {
   try {
-    const dashboard = await redashClient.getDashboard(params.dashboardId);
+    const dashboard = await getRedashClient().getDashboard(params.dashboardId);
 
     return {
       content: [
@@ -616,13 +627,13 @@ async function getDashboardLayout(params: z.infer<typeof getDashboardLayoutSchem
 
 // Tool: get_dashboard_by_slug
 const getDashboardBySlugSchema = z.object({
-  slug: z.string()
+  slug: z.string().describe("Slug of the dashboard to get")
 });
 
 async function getDashboardBySlug(params: z.infer<typeof getDashboardBySlugSchema>) {
   try {
     const { slug } = params;
-    const dashboard = await redashClient.getDashboardBySlug(slug);
+    const dashboard = await getRedashClient().getDashboardBySlug(slug);
 
     return {
       content: [
@@ -648,13 +659,13 @@ async function getDashboardBySlug(params: z.infer<typeof getDashboardBySlugSchem
 
 // Tool: get_visualization
 const getVisualizationSchema = z.object({
-  visualizationId: z.coerce.number()
+  visualizationId: z.coerce.number().describe("ID of the visualization to get")
 });
 
 async function getVisualization(params: z.infer<typeof getVisualizationSchema>) {
   try {
     const { visualizationId } = params;
-    const visualization = await redashClient.getVisualization(visualizationId);
+    const visualization = await getRedashClient().getVisualization(visualizationId);
 
     return {
       content: [
@@ -680,15 +691,15 @@ async function getVisualization(params: z.infer<typeof getVisualizationSchema>) 
 
 // Tool: execute_adhoc_query
 const executeAdhocQuerySchema = z.object({
-  query: z.string(),
-  dataSourceId: z.coerce.number(),
-  applyAutoLimit: z.boolean().optional().default(true)
+  query: z.string().describe("SQL query to execute"),
+  dataSourceId: z.coerce.number().describe("ID of the data source to query against"),
+  applyAutoLimit: z.boolean().optional().default(true).describe("Whether Redash should apply an automatic LIMIT. Set to false for MSSQL data sources, where LIMIT is invalid T-SQL.")
 });
 
 async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>) {
   try {
     const { query, dataSourceId, applyAutoLimit } = params;
-    const result = await redashClient.executeAdhocQuery(query, dataSourceId, applyAutoLimit);
+    const result = await getRedashClient().executeAdhocQuery(query, dataSourceId, applyAutoLimit);
 
     return {
       content: [
@@ -714,11 +725,11 @@ async function executeAdhocQuery(params: z.infer<typeof executeAdhocQuerySchema>
 
 // Tool: create_visualization
 const createVisualizationSchema = z.object({
-  query_id: z.coerce.number(),
-  type: z.string(),
-  name: z.string(),
-  description: z.string().optional(),
-  options: z.record(z.any())
+  query_id: z.coerce.number().describe("ID of the query to create visualization for"),
+  type: z.string().describe("Type of visualization. Available types depend on your Redash instance. Use get_query to see existing visualization types in use."),
+  name: z.string().describe("Name of the visualization"),
+  description: z.string().optional().describe("Description of the visualization"),
+  options: z.record(z.string(), z.any()).describe("Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to examine existing visualizations of the same type as a reference.")
 });
 
 async function createVisualization(params: z.infer<typeof createVisualizationSchema>) {
@@ -731,7 +742,7 @@ async function createVisualization(params: z.infer<typeof createVisualizationSch
       options: params.options
     };
 
-    const result = await redashClient.createVisualization(visualizationData);
+    const result = await getRedashClient().createVisualization(visualizationData);
 
     return {
       content: [
@@ -757,17 +768,17 @@ async function createVisualization(params: z.infer<typeof createVisualizationSch
 
 // Tool: update_visualization
 const updateVisualizationSchema = z.object({
-  visualizationId: z.coerce.number(),
-  type: z.string().optional(),
-  name: z.string().optional(),
-  description: z.string().optional(),
-  options: z.record(z.any()).optional()
+  visualizationId: z.coerce.number().describe("ID of the visualization to update"),
+  type: z.string().optional().describe("Type of visualization. Available types depend on your Redash instance."),
+  name: z.string().optional().describe("Name of the visualization"),
+  description: z.string().optional().describe("Description of the visualization"),
+  options: z.record(z.string(), z.any()).optional().describe("Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to see the current configuration before updating.")
 });
 
 async function updateVisualization(params: z.infer<typeof updateVisualizationSchema>) {
   try {
     const { visualizationId, ...updateData } = params;
-    const result = await redashClient.updateVisualization(visualizationId, updateData);
+    const result = await getRedashClient().updateVisualization(visualizationId, updateData);
 
     return {
       content: [
@@ -795,10 +806,10 @@ async function updateVisualization(params: z.infer<typeof updateVisualizationSch
 async function updateChartVisualization(params: z.infer<typeof chartVisualizationUpdateSchema>) {
   try {
     const { visualizationId, replaceOptions, chartOptions: _chartOptions, ...metadata } = params;
-    const currentVisualization = replaceOptions ? null : await redashClient.getVisualization(visualizationId);
+    const currentVisualization = replaceOptions ? null : await getRedashClient().getVisualization(visualizationId);
     const options = buildChartVisualizationOptions(params, (currentVisualization?.options ?? {}) as Record<string, unknown>);
 
-    const result = await redashClient.updateVisualization(visualizationId, {
+    const result = await getRedashClient().updateVisualization(visualizationId, {
       ...metadata,
       options,
     });
@@ -827,13 +838,13 @@ async function updateChartVisualization(params: z.infer<typeof chartVisualizatio
 
 // Tool: delete_visualization
 const deleteVisualizationSchema = z.object({
-  visualizationId: z.coerce.number()
+  visualizationId: z.coerce.number().describe("ID of the visualization to delete")
 });
 
 async function deleteVisualization(params: z.infer<typeof deleteVisualizationSchema>) {
   try {
     const { visualizationId } = params;
-    await redashClient.deleteVisualization(visualizationId);
+    await getRedashClient().deleteVisualization(visualizationId);
 
     return {
       content: [
@@ -859,13 +870,13 @@ async function deleteVisualization(params: z.infer<typeof deleteVisualizationSch
 
 // Tool: get_schema
 const getSchemaSchema = z.object({
-  dataSourceId: z.coerce.number(),
+  dataSourceId: z.coerce.number().describe("ID of the data source to get schema"),
 });
 
 async function getSchema(params: z.infer<typeof getSchemaSchema>) {
   try {
     const { dataSourceId } = params;
-    const query = await redashClient.getSchema(dataSourceId);
+    const query = await getRedashClient().getSchema(dataSourceId);
 
     return {
       content: [
@@ -897,8 +908,8 @@ async function getSchema(params: z.infer<typeof getSchemaSchema>) {
 
 // Tool: create_dashboard
 const createDashboardSchema = z.object({
-  name: z.string(),
-  tags: z.array(z.string()).optional()
+  name: z.string().describe("Name of the dashboard"),
+  tags: z.array(z.string()).optional().describe("Tags for the dashboard")
 });
 
 async function createDashboard(params: z.infer<typeof createDashboardSchema>) {
@@ -907,7 +918,7 @@ async function createDashboard(params: z.infer<typeof createDashboardSchema>) {
       name: params.name,
       tags: params.tags || []
     };
-    const result = await redashClient.createDashboard(dashboardData);
+    const result = await getRedashClient().createDashboard(dashboardData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -922,12 +933,12 @@ async function createDashboard(params: z.infer<typeof createDashboardSchema>) {
 
 // Tool: update_dashboard
 const updateDashboardSchema = z.object({
-  dashboardId: z.coerce.number(),
-  name: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  is_archived: z.boolean().optional(),
-  is_draft: z.boolean().optional(),
-  dashboard_filters_enabled: z.boolean().optional()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to update"),
+  name: z.string().optional().describe("New name of the dashboard"),
+  tags: z.array(z.string()).optional().describe("Tags for the dashboard"),
+  is_archived: z.boolean().optional().describe("Whether the dashboard is archived"),
+  is_draft: z.boolean().optional().describe("Whether the dashboard is a draft"),
+  dashboard_filters_enabled: z.boolean().optional().describe("Whether dashboard filters are enabled")
 });
 
 async function updateDashboard(params: z.infer<typeof updateDashboardSchema>) {
@@ -940,7 +951,7 @@ async function updateDashboard(params: z.infer<typeof updateDashboardSchema>) {
     if (updateData.is_draft !== undefined) dashboardData.is_draft = updateData.is_draft;
     if (updateData.dashboard_filters_enabled !== undefined) dashboardData.dashboard_filters_enabled = updateData.dashboard_filters_enabled;
 
-    const result = await redashClient.updateDashboard(dashboardId, dashboardData);
+    const result = await getRedashClient().updateDashboard(dashboardId, dashboardData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -955,12 +966,12 @@ async function updateDashboard(params: z.infer<typeof updateDashboardSchema>) {
 
 // Tool: get_dashboard_parameters
 const getDashboardParametersSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard")
 });
 
 async function getDashboardParameters(params: z.infer<typeof getDashboardParametersSchema>) {
   try {
-    const dashboard = await redashClient.getDashboard(params.dashboardId);
+    const dashboard = await getRedashClient().getDashboard(params.dashboardId);
     const dashboardOptions = dashboard.options || {};
 
     return {
@@ -1007,16 +1018,16 @@ async function getDashboardParameters(params: z.infer<typeof getDashboardParamet
 
 // Tool: update_dashboard_parameters
 const updateDashboardParametersSchema = z.object({
-  dashboardId: z.coerce.number(),
-  parameters: z.array(queryParameterPatchSchema).default([]),
-  removeParameterNames: z.array(z.string()).optional(),
-  replaceParameters: z.boolean().optional(),
-  globalParamOrder: z.array(z.string()).optional()
+  dashboardId: z.coerce.number().describe("ID of the dashboard"),
+  parameters: z.array(queryParameterPatchSchema).default([]).describe("Dashboard parameter values to merge into the dashboard"),
+  removeParameterNames: z.array(z.string()).optional().describe("Dashboard parameter names to remove from the dashboard"),
+  replaceParameters: z.boolean().optional().describe("Replace the stored parameter list instead of merging"),
+  globalParamOrder: z.array(z.string()).optional().describe("Explicit display order for dashboard parameters")
 });
 
 async function updateDashboardParameters(params: z.infer<typeof updateDashboardParametersSchema>) {
   try {
-    const dashboard = await redashClient.getDashboard(params.dashboardId);
+    const dashboard = await getRedashClient().getDashboard(params.dashboardId);
     const dashboardOptions = dashboard.options || {};
     const existingParameters = Array.isArray(dashboardOptions.parameters) ? dashboardOptions.parameters : [];
     const updatedParameters = mergeNamedEntries(existingParameters, params.parameters, {
@@ -1035,7 +1046,7 @@ async function updateDashboardParameters(params: z.infer<typeof updateDashboardP
       })
     };
 
-    const result = await redashClient.updateDashboard(params.dashboardId, updateData);
+    const result = await getRedashClient().updateDashboard(params.dashboardId, updateData);
 
     return {
       content: [
@@ -1061,12 +1072,12 @@ async function updateDashboardParameters(params: z.infer<typeof updateDashboardP
 
 // Tool: archive_dashboard
 const archiveDashboardSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to archive")
 });
 
 async function archiveDashboard(params: z.infer<typeof archiveDashboardSchema>) {
   try {
-    const result = await redashClient.archiveDashboard(params.dashboardId);
+    const result = await getRedashClient().archiveDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1081,12 +1092,12 @@ async function archiveDashboard(params: z.infer<typeof archiveDashboardSchema>) 
 
 // Tool: fork_dashboard
 const forkDashboardSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to fork")
 });
 
 async function forkDashboard(params: z.infer<typeof forkDashboardSchema>) {
   try {
-    const result = await redashClient.forkDashboard(params.dashboardId);
+    const result = await getRedashClient().forkDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1101,12 +1112,12 @@ async function forkDashboard(params: z.infer<typeof forkDashboardSchema>) {
 
 // Tool: get_public_dashboard
 const getPublicDashboardSchema = z.object({
-  token: z.string()
+  token: z.string().describe("Public share token of the dashboard")
 });
 
 async function getPublicDashboard(params: z.infer<typeof getPublicDashboardSchema>) {
   try {
-    const result = await redashClient.getPublicDashboard(params.token);
+    const result = await getRedashClient().getPublicDashboard(params.token);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1121,12 +1132,12 @@ async function getPublicDashboard(params: z.infer<typeof getPublicDashboardSchem
 
 // Tool: share_dashboard
 const shareDashboardSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to share")
 });
 
 async function shareDashboard(params: z.infer<typeof shareDashboardSchema>) {
   try {
-    const result = await redashClient.shareDashboard(params.dashboardId);
+    const result = await getRedashClient().shareDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1141,12 +1152,12 @@ async function shareDashboard(params: z.infer<typeof shareDashboardSchema>) {
 
 // Tool: unshare_dashboard
 const unshareDashboardSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to unshare")
 });
 
 async function unshareDashboard(params: z.infer<typeof unshareDashboardSchema>) {
   try {
-    const result = await redashClient.unshareDashboard(params.dashboardId);
+    const result = await getRedashClient().unshareDashboard(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1161,13 +1172,13 @@ async function unshareDashboard(params: z.infer<typeof unshareDashboardSchema>) 
 
 // Tool: get_my_dashboards
 const getMyDashboardsSchema = z.object({
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25)
+  page: paginationPageField,
+  pageSize: paginationPageSizeField
 });
 
 async function getMyDashboards(params: z.infer<typeof getMyDashboardsSchema>) {
   try {
-    const result = await redashClient.getMyDashboards(params.page, params.pageSize);
+    const result = await getRedashClient().getMyDashboards(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1182,13 +1193,13 @@ async function getMyDashboards(params: z.infer<typeof getMyDashboardsSchema>) {
 
 // Tool: get_favorite_dashboards
 const getFavoriteDashboardsSchema = z.object({
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25)
+  page: paginationPageField,
+  pageSize: paginationPageSizeField
 });
 
 async function getFavoriteDashboards(params: z.infer<typeof getFavoriteDashboardsSchema>) {
   try {
-    const result = await redashClient.getFavoriteDashboards(params.page, params.pageSize);
+    const result = await getRedashClient().getFavoriteDashboards(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1203,12 +1214,12 @@ async function getFavoriteDashboards(params: z.infer<typeof getFavoriteDashboard
 
 // Tool: add_dashboard_favorite
 const addDashboardFavoriteSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to add to favorites")
 });
 
 async function addDashboardFavorite(params: z.infer<typeof addDashboardFavoriteSchema>) {
   try {
-    const result = await redashClient.addDashboardFavorite(params.dashboardId);
+    const result = await getRedashClient().addDashboardFavorite(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1223,12 +1234,12 @@ async function addDashboardFavorite(params: z.infer<typeof addDashboardFavoriteS
 
 // Tool: remove_dashboard_favorite
 const removeDashboardFavoriteSchema = z.object({
-  dashboardId: z.coerce.number()
+  dashboardId: z.coerce.number().describe("ID of the dashboard to remove from favorites")
 });
 
 async function removeDashboardFavorite(params: z.infer<typeof removeDashboardFavoriteSchema>) {
   try {
-    const result = await redashClient.removeDashboardFavorite(params.dashboardId);
+    const result = await getRedashClient().removeDashboardFavorite(params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1244,7 +1255,7 @@ async function removeDashboardFavorite(params: z.infer<typeof removeDashboardFav
 // Tool: get_dashboard_tags
 async function getDashboardTags() {
   try {
-    const result = await redashClient.getDashboardTags();
+    const result = await getRedashClient().getDashboardTags();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1262,7 +1273,7 @@ async function getDashboardTags() {
 // Tool: list_alerts
 async function listAlerts() {
   try {
-    const result = await redashClient.getAlerts();
+    const result = await getRedashClient().getAlerts();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1277,12 +1288,12 @@ async function listAlerts() {
 
 // Tool: get_alert
 const getAlertSchema = z.object({
-  alertId: z.coerce.number()
+  alertId: z.coerce.number().describe("ID of the alert to get")
 });
 
 async function getAlert(params: z.infer<typeof getAlertSchema>) {
   try {
-    const result = await redashClient.getAlert(params.alertId);
+    const result = await getRedashClient().getAlert(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1297,16 +1308,16 @@ async function getAlert(params: z.infer<typeof getAlertSchema>) {
 
 // Tool: create_alert
 const createAlertSchema = z.object({
-  name: z.string(),
-  query_id: z.coerce.number(),
+  name: z.string().describe("Name of the alert"),
+  query_id: z.coerce.number().describe("ID of the query to monitor"),
   options: z.object({
-    column: z.string(),
-    op: z.string(),
-    value: z.union([z.coerce.number(), z.string()]),
-    custom_subject: z.string().optional(),
-    custom_body: z.string().optional()
-  }),
-  rearm: z.coerce.number().nullable().optional()
+    column: z.string().describe("Column name to monitor"),
+    op: z.string().describe("Comparison operator: greater than, less than, equals, not equals, etc."),
+    value: z.union([z.coerce.number(), z.string()]).describe("Threshold value to compare against"),
+    custom_subject: z.string().optional().describe("Custom email subject"),
+    custom_body: z.string().optional().describe("Custom email body")
+  }).describe("Alert options including column to monitor, operator, and threshold value"),
+  rearm: z.coerce.number().nullable().optional().describe("Number of seconds to wait before triggering again (null for never)")
 });
 
 async function createAlert(params: z.infer<typeof createAlertSchema>) {
@@ -1317,7 +1328,7 @@ async function createAlert(params: z.infer<typeof createAlertSchema>) {
       options: params.options,
       rearm: params.rearm
     };
-    const result = await redashClient.createAlert(alertData);
+    const result = await getRedashClient().createAlert(alertData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1332,17 +1343,17 @@ async function createAlert(params: z.infer<typeof createAlertSchema>) {
 
 // Tool: update_alert
 const updateAlertSchema = z.object({
-  alertId: z.coerce.number(),
-  name: z.string().optional(),
-  query_id: z.coerce.number().optional(),
+  alertId: z.coerce.number().describe("ID of the alert to update"),
+  name: z.string().optional().describe("New name of the alert"),
+  query_id: z.coerce.number().optional().describe("ID of the query to monitor"),
   options: z.object({
-    column: z.string().optional(),
-    op: z.string().optional(),
-    value: z.union([z.coerce.number(), z.string()]).optional(),
-    custom_subject: z.string().optional(),
-    custom_body: z.string().optional()
-  }).optional(),
-  rearm: z.coerce.number().nullable().optional()
+    column: z.string().optional().describe("Column name to monitor"),
+    op: z.string().optional().describe("Comparison operator"),
+    value: z.union([z.coerce.number(), z.string()]).optional().describe("Threshold value"),
+    custom_subject: z.string().optional().describe("Custom email subject"),
+    custom_body: z.string().optional().describe("Custom email body")
+  }).optional().describe("Alert options"),
+  rearm: z.coerce.number().nullable().optional().describe("Number of seconds to wait before triggering again")
 });
 
 async function updateAlert(params: z.infer<typeof updateAlertSchema>) {
@@ -1354,7 +1365,7 @@ async function updateAlert(params: z.infer<typeof updateAlertSchema>) {
     if (updateData.options !== undefined) alertData.options = updateData.options;
     if (updateData.rearm !== undefined) alertData.rearm = updateData.rearm;
 
-    const result = await redashClient.updateAlert(alertId, alertData);
+    const result = await getRedashClient().updateAlert(alertId, alertData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1369,12 +1380,12 @@ async function updateAlert(params: z.infer<typeof updateAlertSchema>) {
 
 // Tool: delete_alert
 const deleteAlertSchema = z.object({
-  alertId: z.coerce.number()
+  alertId: z.coerce.number().describe("ID of the alert to delete")
 });
 
 async function deleteAlert(params: z.infer<typeof deleteAlertSchema>) {
   try {
-    const result = await redashClient.deleteAlert(params.alertId);
+    const result = await getRedashClient().deleteAlert(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1389,12 +1400,12 @@ async function deleteAlert(params: z.infer<typeof deleteAlertSchema>) {
 
 // Tool: mute_alert
 const muteAlertSchema = z.object({
-  alertId: z.coerce.number()
+  alertId: z.coerce.number().describe("ID of the alert to mute")
 });
 
 async function muteAlert(params: z.infer<typeof muteAlertSchema>) {
   try {
-    const result = await redashClient.muteAlert(params.alertId);
+    const result = await getRedashClient().muteAlert(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1409,12 +1420,12 @@ async function muteAlert(params: z.infer<typeof muteAlertSchema>) {
 
 // Tool: get_alert_subscriptions
 const getAlertSubscriptionsSchema = z.object({
-  alertId: z.coerce.number()
+  alertId: z.coerce.number().describe("ID of the alert")
 });
 
 async function getAlertSubscriptions(params: z.infer<typeof getAlertSubscriptionsSchema>) {
   try {
-    const result = await redashClient.getAlertSubscriptions(params.alertId);
+    const result = await getRedashClient().getAlertSubscriptions(params.alertId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1429,8 +1440,8 @@ async function getAlertSubscriptions(params: z.infer<typeof getAlertSubscription
 
 // Tool: add_alert_subscription
 const addAlertSubscriptionSchema = z.object({
-  alertId: z.coerce.number(),
-  destination_id: z.coerce.number().optional()
+  alertId: z.coerce.number().describe("ID of the alert to subscribe to"),
+  destination_id: z.coerce.number().optional().describe("ID of the notification destination (optional, defaults to email)")
 });
 
 async function addAlertSubscription(params: z.infer<typeof addAlertSubscriptionSchema>) {
@@ -1438,7 +1449,7 @@ async function addAlertSubscription(params: z.infer<typeof addAlertSubscriptionS
     const subscriptionData: CreateAlertSubscriptionRequest = {};
     if (params.destination_id !== undefined) subscriptionData.destination_id = params.destination_id;
 
-    const result = await redashClient.addAlertSubscription(params.alertId, subscriptionData);
+    const result = await getRedashClient().addAlertSubscription(params.alertId, subscriptionData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1453,13 +1464,13 @@ async function addAlertSubscription(params: z.infer<typeof addAlertSubscriptionS
 
 // Tool: remove_alert_subscription
 const removeAlertSubscriptionSchema = z.object({
-  alertId: z.coerce.number(),
-  subscriptionId: z.coerce.number()
+  alertId: z.coerce.number().describe("ID of the alert"),
+  subscriptionId: z.coerce.number().describe("ID of the subscription to remove")
 });
 
 async function removeAlertSubscription(params: z.infer<typeof removeAlertSubscriptionSchema>) {
   try {
-    const result = await redashClient.removeAlertSubscription(params.alertId, params.subscriptionId);
+    const result = await getRedashClient().removeAlertSubscription(params.alertId, params.subscriptionId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1476,12 +1487,12 @@ async function removeAlertSubscription(params: z.infer<typeof removeAlertSubscri
 
 // Tool: fork_query
 const forkQuerySchema = z.object({
-  queryId: z.coerce.number()
+  queryId: z.coerce.number().describe("ID of the query to fork")
 });
 
 async function forkQuery(params: z.infer<typeof forkQuerySchema>) {
   try {
-    const result = await redashClient.forkQuery(params.queryId);
+    const result = await getRedashClient().forkQuery(params.queryId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1496,13 +1507,13 @@ async function forkQuery(params: z.infer<typeof forkQuerySchema>) {
 
 // Tool: get_my_queries
 const getMyQueriesSchema = z.object({
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25)
+  page: paginationPageField,
+  pageSize: paginationPageSizeField
 });
 
 async function getMyQueries(params: z.infer<typeof getMyQueriesSchema>) {
   try {
-    const result = await redashClient.getMyQueries(params.page, params.pageSize);
+    const result = await getRedashClient().getMyQueries(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1517,13 +1528,13 @@ async function getMyQueries(params: z.infer<typeof getMyQueriesSchema>) {
 
 // Tool: get_recent_queries
 const getRecentQueriesSchema = z.object({
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25)
+  page: paginationPageField,
+  pageSize: paginationPageSizeField
 });
 
 async function getRecentQueries(params: z.infer<typeof getRecentQueriesSchema>) {
   try {
-    const result = await redashClient.getRecentQueries(params.page, params.pageSize);
+    const result = await getRedashClient().getRecentQueries(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1539,7 +1550,7 @@ async function getRecentQueries(params: z.infer<typeof getRecentQueriesSchema>) 
 // Tool: get_query_tags
 async function getQueryTags() {
   try {
-    const result = await redashClient.getQueryTags();
+    const result = await getRedashClient().getQueryTags();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1554,13 +1565,13 @@ async function getQueryTags() {
 
 // Tool: get_favorite_queries
 const getFavoriteQueriesSchema = z.object({
-  page: z.coerce.number().optional().default(1),
-  pageSize: z.coerce.number().optional().default(25)
+  page: paginationPageField,
+  pageSize: paginationPageSizeField
 });
 
 async function getFavoriteQueries(params: z.infer<typeof getFavoriteQueriesSchema>) {
   try {
-    const result = await redashClient.getFavoriteQueries(params.page, params.pageSize);
+    const result = await getRedashClient().getFavoriteQueries(params.page, params.pageSize);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1575,12 +1586,12 @@ async function getFavoriteQueries(params: z.infer<typeof getFavoriteQueriesSchem
 
 // Tool: add_query_favorite
 const addQueryFavoriteSchema = z.object({
-  queryId: z.coerce.number()
+  queryId: z.coerce.number().describe("ID of the query to add to favorites")
 });
 
 async function addQueryFavorite(params: z.infer<typeof addQueryFavoriteSchema>) {
   try {
-    const result = await redashClient.addQueryFavorite(params.queryId);
+    const result = await getRedashClient().addQueryFavorite(params.queryId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1595,12 +1606,12 @@ async function addQueryFavorite(params: z.infer<typeof addQueryFavoriteSchema>) 
 
 // Tool: remove_query_favorite
 const removeQueryFavoriteSchema = z.object({
-  queryId: z.coerce.number()
+  queryId: z.coerce.number().describe("ID of the query to remove from favorites")
 });
 
 async function removeQueryFavorite(params: z.infer<typeof removeQueryFavoriteSchema>) {
   try {
-    const result = await redashClient.removeQueryFavorite(params.queryId);
+    const result = await getRedashClient().removeQueryFavorite(params.queryId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1618,7 +1629,7 @@ async function removeQueryFavorite(params: z.infer<typeof removeQueryFavoriteSch
 // Tool: list_widgets
 async function listWidgets() {
   try {
-    const result = await redashClient.getWidgets();
+    const result = await getRedashClient().getWidgets();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1633,12 +1644,12 @@ async function listWidgets() {
 
 // Tool: get_widget
 const getWidgetSchema = z.object({
-  widgetId: z.coerce.number()
+  widgetId: z.coerce.number().describe("ID of the widget to get")
 });
 
 async function getWidget(params: z.infer<typeof getWidgetSchema>) {
   try {
-    const result = await redashClient.getWidget(params.widgetId);
+    const result = await getRedashClient().getWidget(params.widgetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1653,11 +1664,11 @@ async function getWidget(params: z.infer<typeof getWidgetSchema>) {
 
 // Tool: create_widget
 const createWidgetSchema = z.object({
-  dashboard_id: z.coerce.number(),
-  visualization_id: z.coerce.number().optional(),
-  text: z.string().optional(),
-  width: z.coerce.number(),
-  options: z.record(z.any()).optional(),
+  dashboard_id: z.coerce.number().describe("ID of the dashboard to add the widget to"),
+  visualization_id: z.coerce.number().optional().describe("ID of the visualization to display (optional if text widget)"),
+  text: z.string().optional().describe("Text content for text widgets"),
+  width: z.coerce.number().describe("Width of the widget (1-6)"),
+  options: z.record(z.string(), z.any()).optional().describe("Widget options"),
   position: widgetPositionSchema.optional()
 });
 
@@ -1671,7 +1682,7 @@ async function createWidget(params: z.infer<typeof createWidgetSchema>) {
       width: params.width,
       options: widgetOptions
     };
-    const result = await redashClient.createWidget(widgetData);
+    const result = await getRedashClient().createWidget(widgetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1686,11 +1697,11 @@ async function createWidget(params: z.infer<typeof createWidgetSchema>) {
 
 // Tool: update_widget
 const updateWidgetSchema = z.object({
-  widgetId: z.coerce.number(),
-  visualization_id: z.coerce.number().optional(),
-  text: z.string().optional(),
-  width: z.coerce.number().optional(),
-  options: z.record(z.any()).optional(),
+  widgetId: z.coerce.number().describe("ID of the widget to update"),
+  visualization_id: z.coerce.number().optional().describe("ID of the visualization to display"),
+  text: z.string().optional().describe("Text content for text widgets"),
+  width: z.coerce.number().optional().describe("Width of the widget (1-6)"),
+  options: z.record(z.string(), z.any()).optional().describe("Widget options"),
   position: widgetPositionSchema.optional()
 });
 
@@ -1704,7 +1715,7 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
     if (updateData.options !== undefined) widgetData.options = updateData.options;
 
     if (position) {
-      const currentWidget = await redashClient.getWidget(widgetId);
+      const currentWidget = await getRedashClient().getWidget(widgetId);
       const currentOptions = updateData.options !== undefined ? updateData.options : (currentWidget.options ?? {});
       widgetData.options = buildWidgetLayoutOptions(currentOptions, position);
       if (updateData.text === undefined) {
@@ -1712,7 +1723,7 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
       }
     }
 
-    const result = await redashClient.updateWidget(widgetId, widgetData);
+    const result = await getRedashClient().updateWidget(widgetId, widgetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1727,14 +1738,14 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
 
 // Tool: update_widget_layout
 const updateWidgetLayoutSchema = z.object({
-  widgetId: z.coerce.number(),
+  widgetId: z.coerce.number().describe("ID of the widget"),
   position: widgetPositionSchema,
 });
 
 async function updateWidgetLayout(params: z.infer<typeof updateWidgetLayoutSchema>) {
   try {
-    const widget = await redashClient.getWidget(params.widgetId);
-    const result = await redashClient.updateWidget(params.widgetId, {
+    const widget = await getRedashClient().getWidget(params.widgetId);
+    const result = await getRedashClient().updateWidget(params.widgetId, {
       text: widget.text ?? "",
       options: buildWidgetLayoutOptions(widget.options ?? {}, params.position),
     });
@@ -1753,13 +1764,13 @@ async function updateWidgetLayout(params: z.infer<typeof updateWidgetLayoutSchem
 
 // Tool: update_dashboard_layout
 const updateDashboardLayoutSchema = z.object({
-  dashboardId: z.coerce.number(),
-  widgets: z.array(widgetLayoutEntrySchema).min(1)
+  dashboardId: z.coerce.number().describe("ID of the dashboard"),
+  widgets: z.array(widgetLayoutEntrySchema).min(1).describe("Widgets to move or resize")
 });
 
 async function updateDashboardLayout(params: z.infer<typeof updateDashboardLayoutSchema>) {
   try {
-    const dashboard = await redashClient.getDashboard(params.dashboardId);
+    const dashboard = await getRedashClient().getDashboard(params.dashboardId);
     const dashboardWidgets = new Map((dashboard.widgets || []).map((widget) => [widget.id, widget]));
 
     for (const layout of params.widgets) {
@@ -1770,7 +1781,7 @@ async function updateDashboardLayout(params: z.infer<typeof updateDashboardLayou
 
     const results = await Promise.allSettled(params.widgets.map(async (layout) => {
       const widget = dashboardWidgets.get(layout.widgetId)!;
-      return redashClient.updateWidget(layout.widgetId, {
+      return getRedashClient().updateWidget(layout.widgetId, {
         text: widget.text ?? "",
         options: buildWidgetLayoutOptions(widget.options ?? {}, layout.position),
       });
@@ -1816,12 +1827,12 @@ async function updateDashboardLayout(params: z.infer<typeof updateDashboardLayou
 
 // Tool: get_widget_parameter_mappings
 const getWidgetParameterMappingsSchema = z.object({
-  widgetId: z.coerce.number()
+  widgetId: z.coerce.number().describe("ID of the widget")
 });
 
 async function getWidgetParameterMappings(params: z.infer<typeof getWidgetParameterMappingsSchema>) {
   try {
-    const widget = await redashClient.getWidget(params.widgetId);
+    const widget = await getRedashClient().getWidget(params.widgetId);
     const mappings = toNamedEntries(widget.options?.parameterMappings || {}).sort((a, b) => a.name.localeCompare(b.name));
 
     return {
@@ -1858,15 +1869,15 @@ async function getWidgetParameterMappings(params: z.infer<typeof getWidgetParame
 
 // Tool: update_widget_parameter_mappings
 const updateWidgetParameterMappingsSchema = z.object({
-  widgetId: z.coerce.number(),
-  parameterMappings: z.array(widgetParameterMappingPatchSchema).default([]),
-  removeParameterNames: z.array(z.string()).optional(),
-  replaceParameterMappings: z.boolean().optional()
+  widgetId: z.coerce.number().describe("ID of the widget"),
+  parameterMappings: z.array(widgetParameterMappingPatchSchema).default([]).describe("Parameter mappings to merge into the widget"),
+  removeParameterNames: z.array(z.string()).optional().describe("Widget parameter mapping names to remove"),
+  replaceParameterMappings: z.boolean().optional().describe("Replace the stored mappings instead of merging")
 });
 
 async function updateWidgetParameterMappings(params: z.infer<typeof updateWidgetParameterMappingsSchema>) {
   try {
-    const widget = await redashClient.getWidget(params.widgetId);
+    const widget = await getRedashClient().getWidget(params.widgetId);
     const widgetOptions = widget.options || {};
     const existingMappings = toNamedEntries(widgetOptions.parameterMappings || {});
     const updatedMappings = mergeNamedEntries(existingMappings, params.parameterMappings, {
@@ -1882,7 +1893,7 @@ async function updateWidgetParameterMappings(params: z.infer<typeof updateWidget
       }
     };
 
-    const result = await redashClient.updateWidget(params.widgetId, updateData);
+    const result = await getRedashClient().updateWidget(params.widgetId, updateData);
 
     return {
       content: [
@@ -1908,12 +1919,12 @@ async function updateWidgetParameterMappings(params: z.infer<typeof updateWidget
 
 // Tool: delete_widget
 const deleteWidgetSchema = z.object({
-  widgetId: z.coerce.number()
+  widgetId: z.coerce.number().describe("ID of the widget to delete")
 });
 
 async function deleteWidget(params: z.infer<typeof deleteWidgetSchema>) {
   try {
-    const result = await redashClient.deleteWidget(params.widgetId);
+    const result = await getRedashClient().deleteWidget(params.widgetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1931,7 +1942,7 @@ async function deleteWidget(params: z.infer<typeof deleteWidgetSchema>) {
 // Tool: list_query_snippets
 async function listQuerySnippets() {
   try {
-    const result = await redashClient.getQuerySnippets();
+    const result = await getRedashClient().getQuerySnippets();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1946,12 +1957,12 @@ async function listQuerySnippets() {
 
 // Tool: get_query_snippet
 const getQuerySnippetSchema = z.object({
-  snippetId: z.coerce.number()
+  snippetId: z.coerce.number().describe("ID of the snippet to get")
 });
 
 async function getQuerySnippet(params: z.infer<typeof getQuerySnippetSchema>) {
   try {
-    const result = await redashClient.getQuerySnippet(params.snippetId);
+    const result = await getRedashClient().getQuerySnippet(params.snippetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1966,9 +1977,9 @@ async function getQuerySnippet(params: z.infer<typeof getQuerySnippetSchema>) {
 
 // Tool: create_query_snippet
 const createQuerySnippetSchema = z.object({
-  trigger: z.string(),
-  description: z.string().optional(),
-  snippet: z.string()
+  trigger: z.string().describe("Trigger keyword for the snippet"),
+  description: z.string().optional().describe("Description of the snippet"),
+  snippet: z.string().describe("The SQL snippet content")
 });
 
 async function createQuerySnippet(params: z.infer<typeof createQuerySnippetSchema>) {
@@ -1978,7 +1989,7 @@ async function createQuerySnippet(params: z.infer<typeof createQuerySnippetSchem
       description: params.description,
       snippet: params.snippet
     };
-    const result = await redashClient.createQuerySnippet(snippetData);
+    const result = await getRedashClient().createQuerySnippet(snippetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1993,10 +2004,10 @@ async function createQuerySnippet(params: z.infer<typeof createQuerySnippetSchem
 
 // Tool: update_query_snippet
 const updateQuerySnippetSchema = z.object({
-  snippetId: z.coerce.number(),
-  trigger: z.string().optional(),
-  description: z.string().optional(),
-  snippet: z.string().optional()
+  snippetId: z.coerce.number().describe("ID of the snippet to update"),
+  trigger: z.string().optional().describe("Trigger keyword for the snippet"),
+  description: z.string().optional().describe("Description of the snippet"),
+  snippet: z.string().optional().describe("The SQL snippet content")
 });
 
 async function updateQuerySnippet(params: z.infer<typeof updateQuerySnippetSchema>) {
@@ -2007,7 +2018,7 @@ async function updateQuerySnippet(params: z.infer<typeof updateQuerySnippetSchem
     if (updateData.description !== undefined) snippetData.description = updateData.description;
     if (updateData.snippet !== undefined) snippetData.snippet = updateData.snippet;
 
-    const result = await redashClient.updateQuerySnippet(snippetId, snippetData);
+    const result = await getRedashClient().updateQuerySnippet(snippetId, snippetData);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -2022,12 +2033,12 @@ async function updateQuerySnippet(params: z.infer<typeof updateQuerySnippetSchem
 
 // Tool: delete_query_snippet
 const deleteQuerySnippetSchema = z.object({
-  snippetId: z.coerce.number()
+  snippetId: z.coerce.number().describe("ID of the snippet to delete")
 });
 
 async function deleteQuerySnippet(params: z.infer<typeof deleteQuerySnippetSchema>) {
   try {
-    const result = await redashClient.deleteQuerySnippet(params.snippetId);
+    const result = await getRedashClient().deleteQuerySnippet(params.snippetId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -2045,7 +2056,7 @@ async function deleteQuerySnippet(params: z.infer<typeof deleteQuerySnippetSchem
 // Tool: list_destinations
 async function listDestinations() {
   try {
-    const result = await redashClient.getDestinations();
+    const result = await getRedashClient().getDestinations();
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -2060,20 +2071,18 @@ async function listDestinations() {
 
 
 // ----- Resources Implementation -----
-
-// List available resources
-server.setRequestHandler(ListResourcesRequestSchema, async () => {
+async function listRedashResources() {
   try {
-    // List queries as resources
-    const queries = await redashClient.getQueries(1, 100);
+    const [queries, dashboards] = await Promise.all([
+      getRedashClient().getQueries(1, 100),
+      getRedashClient().getDashboards(1, 100),
+    ]);
     const queryResources = queries.results.map(query => ({
       uri: `redash://query/${query.id}`,
       name: query.name,
       description: query.description || `Query ID: ${query.id}`
     }));
 
-    // List dashboards as resources
-    const dashboards = await redashClient.getDashboards(1, 100);
     const dashboardResources = dashboards.results.map(dashboard => ({
       uri: `redash://dashboard/${dashboard.id}`,
       name: dashboard.name,
@@ -2084,35 +2093,30 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
       resources: [...queryResources, ...dashboardResources]
     };
   } catch (error) {
-    console.error('Error listing resources:', error);
-    return {
-      resources: []
-    };
+    logger.error(`Error listing resources: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
   }
-});
+}
 
-// Read resource content
-server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  const { uri } = request.params;
-
+async function readRedashResource(uri: URL, variables: Variables) {
   try {
-    const match = uri.match(/^redash:\/\/(query|dashboard)\/(\d+)$/);
+    const type = getResourceVariable(variables.type, "type", uri);
+    const resourceId = Number.parseInt(getResourceVariable(variables.id, "id", uri), 10);
 
-    if (!match) {
-      throw new Error(`Invalid resource URI: ${uri}`);
+    if (!Number.isSafeInteger(resourceId) || resourceId < 0) {
+      throw new Error(`Invalid resource URI: ${uri.href}`);
     }
 
-    const [, type, id] = match;
-    const resourceId = parseInt(id, 10);
-
-    if (type === 'query') {
-      const query = await redashClient.getQuery(resourceId);
-      const result = await redashClient.executeQuery(resourceId);
+    if (type === "query") {
+      const [query, result] = await Promise.all([
+        getRedashClient().getQuery(resourceId),
+        getRedashClient().executeQuery(resourceId),
+      ]);
 
       return {
         contents: [
           {
-            uri,
+            uri: uri.href,
             mimeType: "application/json",
             text: JSON.stringify({
               query: query,
@@ -2121,13 +2125,13 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
           }
         ]
       };
-    } else if (type === 'dashboard') {
-      const dashboard = await redashClient.getDashboard(resourceId);
+    } else if (type === "dashboard") {
+      const dashboard = await getRedashClient().getDashboard(resourceId);
 
       return {
         contents: [
           {
-            uri,
+            uri: uri.href,
             mimeType: "application/json",
             text: JSON.stringify(dashboard, null, 2)
           }
@@ -2137,697 +2141,172 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
     throw new Error(`Unsupported resource type: ${type}`);
   } catch (error) {
-    console.error(`Error reading resource ${uri}:`, error);
+    logger.error(`Error reading resource ${uri.href}: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
-});
+}
 
-const chartVisualizationSchemaDescriptions = {
-  visualizationId: "ID of the visualization to update",
-  type: "Type of visualization",
-  name: "Name of the visualization",
-  description: "Description of the visualization",
-  replaceOptions: "Replace the entire options payload instead of merging with the current config",
-  globalSeriesType: "Chart type",
-  sortX: "Sort the X axis",
-  swappedAxes: "Swap the chart axes",
-  sortY: "Sort heatmap values",
-  reverseY: "Reverse heatmap order",
-  showpoints: "Show all points for box charts",
-  alignYAxesAtZero: "Align left and right Y axes at zero",
-  xAxis: "X axis settings",
-  yAxis: "Y axis settings",
-  error_y: "Error bar settings",
-  series: "Series-wide chart settings",
-  seriesOptions: "Per-series settings keyed by series name",
-  valuesOptions: "Per-value settings",
-  columnMapping: "Column mappings such as x, y, and series",
-  sizemode: "Bubble size mode",
-  coefficient: "Bubble size coefficient",
-  piesort: "Sort pie slices",
-  color_scheme: "Color palette name",
-  lineShape: "Line interpolation",
-  showDataLabels: "Toggle data labels",
-  numberFormat: "Number format",
-  percentFormat: "Percent format",
-  dateTimeFormat: "Date/time format",
-  textFormat: "Data label template",
-  enableLink: "Enable click-through links",
-  linkOpenNewTab: "Open click-through links in a new tab",
-  linkFormat: "Click-through URL template",
-  missingValuesAsZero: "Convert missing values to zero",
-  chartOptions: "Raw Redash chart options to merge into the payload",
-} satisfies JsonSchemaDescriptionMap;
+function getResourceVariable(value: string | string[] | undefined, name: string, uri: URL): string {
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${name} in resource URI: ${uri.href}`);
+  }
 
-const createAlertSchemaDescriptions = {
-  name: "Name of the alert",
-  query_id: "ID of the query to monitor",
-  options: "Alert options including column to monitor, operator, and threshold value",
-  "options.column": "Column name to monitor",
-  "options.op": "Comparison operator: greater than, less than, equals, not equals, etc.",
-  "options.value": "Threshold value to compare against",
-  "options.custom_subject": "Custom email subject",
-  "options.custom_body": "Custom email body",
-  rearm: "Number of seconds to wait before triggering again (null for never)",
-} satisfies JsonSchemaDescriptionMap;
+  return value;
+}
 
-const updateAlertSchemaDescriptions = {
-  alertId: "ID of the alert to update",
-  name: "New name of the alert",
-  query_id: "ID of the query to monitor",
-  options: "Alert options",
-  "options.column": "Column name to monitor",
-  "options.op": "Comparison operator",
-  "options.value": "Threshold value",
-  "options.custom_subject": "Custom email subject",
-  "options.custom_body": "Custom email body",
-  rearm: "Number of seconds to wait before triggering again",
-} satisfies JsonSchemaDescriptionMap;
-
-const toolDefinitions = [
-  defineTool("list_queries", "List all available queries in Redash", listQueriesSchema, {
-    ...paginationSchemaDescriptions,
-    q: "Search query",
-  }),
-  defineTool("get_query", "Get details of a specific query", getQuerySchema, {
-    queryId: "ID of the query to get",
-  }),
-  defineTool("create_query", "Create a new query in Redash", createQuerySchema, {
-    name: "Name of the query",
-    data_source_id: "ID of the data source to use",
-    query: "SQL query text",
-    description: "Description of the query",
-    options: "Query options",
-    schedule: "Query schedule",
-    tags: "Tags for the query",
-  }),
-  defineTool("update_query", "Update an existing query in Redash", updateQuerySchema, {
-    queryId: "ID of the query to update",
-    name: "New name of the query",
-    data_source_id: "ID of the data source to use",
-    query: "SQL query text",
-    description: "Description of the query",
-    options: "Query options",
-    schedule: "Query schedule",
-    tags: "Tags for the query",
-    is_archived: "Whether the query is archived",
-    is_draft: "Whether the query is a draft",
-  }),
-  defineTool("get_query_parameters", "Get the saved parameter definitions for a query", getQueryParametersSchema, {
-    queryId: "ID of the query",
-  }),
-  defineTool("update_query_parameters", "Update a query's saved parameter definitions", updateQueryParametersSchema, {
-    queryId: "ID of the query",
-    parameters: "Parameter definitions to merge into the query",
-    removeParameterNames: "Saved parameter names to remove from the query",
-    replaceParameters: "Replace the stored parameter list instead of merging",
-  }),
-  defineTool("archive_query", "Archive (soft-delete) a query in Redash", archiveQuerySchema, {
-    queryId: "ID of the query to archive",
-  }),
-  defineTool("list_data_sources", "List all available data sources in Redash"),
-  defineTool("execute_query", "Execute a Redash query and return results", executeQuerySchema, {
-    queryId: "ID of the query to execute",
-    parameters: "Parameters to pass to the query (if any)",
-    maxAge: "Cache age in seconds. Use 0 to force a fresh execution.",
-  }),
+export const toolDefinitions = [
+  defineTool("list_queries", "List all available queries in Redash", listQueries, listQueriesSchema),
+  defineTool("get_query", "Get details of a specific query", getQuery, getQuerySchema),
+  defineTool("create_query", "Create a new query in Redash", createQuery, createQuerySchema),
+  defineTool("update_query", "Update an existing query in Redash", updateQuery, updateQuerySchema),
+  defineTool("get_query_parameters", "Get the saved parameter definitions for a query", getQueryParameters, getQueryParametersSchema),
+  defineTool("update_query_parameters", "Update a query's saved parameter definitions", updateQueryParameters, updateQueryParametersSchema),
+  defineTool("archive_query", "Archive (soft-delete) a query in Redash", archiveQuery, archiveQuerySchema),
+  defineTool("list_data_sources", "List all available data sources in Redash", listDataSources),
+  defineTool("execute_query", "Execute a Redash query and return results", executeQuery, executeQuerySchema),
   defineTool(
     "execute_parameterized_query",
     "Execute a saved parameterized query using its saved parameter definitions and defaults",
+    executeParameterizedQuery,
     executeParameterizedQuerySchema,
-    {
-      queryId: "ID of the query to execute",
-      parameters: "Explicit parameter values to coerce using the saved Redash parameter definitions",
-      useSavedDefaults: "Apply saved default parameter values when a parameter is omitted",
-      maxAge: "Cache age in seconds. Use 0 to force a fresh execution.",
-    }
   ),
   defineTool(
     "get_query_results_csv",
     "Get query results in CSV format. Returns the last cached results, or optionally refreshes the query first to get the latest data. Note: Does not support parameterized queries.",
+    getQueryResultsCsv,
     getQueryResultsCsvSchema,
-    {
-      queryId: "ID of the query to get results from",
-      refresh: "Whether to refresh the query before fetching results to ensure latest data (default: false)",
-    }
   ),
-  defineTool("list_dashboards", "List all available dashboards in Redash", listDashboardsSchema, paginationSchemaDescriptions),
-  defineTool("get_dashboard", "Get details of a specific dashboard", getDashboardSchema, {
-    dashboardId: "ID of the dashboard to get",
-  }),
-  defineTool("get_dashboard_layout", "Get the current widget layout for a dashboard", getDashboardLayoutSchema, {
-    dashboardId: "ID of the dashboard",
-  }),
-  defineTool("get_dashboard_by_slug", "Get details of a specific dashboard by its slug", getDashboardBySlugSchema, {
-    slug: "Slug of the dashboard to get",
-  }),
-  defineTool("get_visualization", "Get details of a specific visualization", getVisualizationSchema, {
-    visualizationId: "ID of the visualization to get",
-  }),
+  defineTool("list_dashboards", "List all available dashboards in Redash", listDashboards, listDashboardsSchema),
+  defineTool("get_dashboard", "Get details of a specific dashboard", getDashboard, getDashboardSchema),
+  defineTool("get_dashboard_layout", "Get the current widget layout for a dashboard", getDashboardLayout, getDashboardLayoutSchema),
+  defineTool("get_dashboard_by_slug", "Get details of a specific dashboard by its slug", getDashboardBySlug, getDashboardBySlugSchema),
+  defineTool("get_visualization", "Get details of a specific visualization", getVisualization, getVisualizationSchema),
   defineTool(
     "execute_adhoc_query",
     "Execute an ad-hoc query without saving it to Redash. Creates a temporary query that is automatically deleted after execution.",
+    executeAdhocQuery,
     executeAdhocQuerySchema,
-    {
-      query: "SQL query to execute",
-      dataSourceId: "ID of the data source to query against",
-      applyAutoLimit: "Whether Redash should apply an automatic LIMIT. Set to false for MSSQL data sources, where LIMIT is invalid T-SQL.",
-    }
   ),
-  defineTool("create_visualization", "Create a new visualization for a query", createVisualizationSchema, {
-    query_id: "ID of the query to create visualization for",
-    type: "Type of visualization. Available types depend on your Redash instance. Use get_query to see existing visualization types in use.",
-    name: "Name of the visualization",
-    description: "Description of the visualization",
-    options: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to examine existing visualizations of the same type as a reference.",
-  }),
-  defineTool("update_visualization", "Update an existing visualization", updateVisualizationSchema, {
-    visualizationId: "ID of the visualization to update",
-    type: "Type of visualization. Available types depend on your Redash instance.",
-    name: "Name of the visualization",
-    description: "Description of the visualization",
-    options: "Visualization-specific configuration. The structure depends on your Redash instance and visualization type. Use get_visualization to see the current configuration before updating.",
-  }),
+  defineTool("create_visualization", "Create a new visualization for a query", createVisualization, createVisualizationSchema),
+  defineTool("update_visualization", "Update an existing visualization", updateVisualization, updateVisualizationSchema),
   defineTool(
     "update_chart_visualization",
     "Update chart-specific visualization options and merge them with the current Redash chart config by default",
+    updateChartVisualization,
     chartVisualizationUpdateSchema,
-    chartVisualizationSchemaDescriptions
   ),
-  defineTool("delete_visualization", "Delete a visualization", deleteVisualizationSchema, {
-    visualizationId: "ID of the visualization to delete",
-  }),
-  defineTool("get_schema", "Get schema of a specific data source", getSchemaSchema, {
-    dataSourceId: "ID of the data source to get schema",
-  }),
-  defineTool("create_dashboard", "Create a new dashboard in Redash", createDashboardSchema, {
-    name: "Name of the dashboard",
-    tags: "Tags for the dashboard",
-  }),
-  defineTool("update_dashboard", "Update an existing dashboard in Redash", updateDashboardSchema, {
-    dashboardId: "ID of the dashboard to update",
-    name: "New name of the dashboard",
-    tags: "Tags for the dashboard",
-    is_archived: "Whether the dashboard is archived",
-    is_draft: "Whether the dashboard is a draft",
-    dashboard_filters_enabled: "Whether dashboard filters are enabled",
-  }),
-  defineTool("get_dashboard_parameters", "Get the current dashboard parameter values and widget mappings", getDashboardParametersSchema, {
-    dashboardId: "ID of the dashboard",
-  }),
-  defineTool("update_dashboard_parameters", "Update dashboard parameter values and ordering", updateDashboardParametersSchema, {
-    dashboardId: "ID of the dashboard",
-    parameters: "Dashboard parameter values to merge into the dashboard",
-    removeParameterNames: "Dashboard parameter names to remove from the dashboard",
-    replaceParameters: "Replace the stored parameter list instead of merging",
-    globalParamOrder: "Explicit display order for dashboard parameters",
-  }),
-  defineTool("archive_dashboard", "Archive (soft-delete) a dashboard in Redash", archiveDashboardSchema, {
-    dashboardId: "ID of the dashboard to archive",
-  }),
-  defineTool("fork_dashboard", "Fork (duplicate) an existing dashboard", forkDashboardSchema, {
-    dashboardId: "ID of the dashboard to fork",
-  }),
-  defineTool("get_public_dashboard", "Get a public dashboard by its share token", getPublicDashboardSchema, {
-    token: "Public share token of the dashboard",
-  }),
-  defineTool("share_dashboard", "Share a dashboard and create a public link", shareDashboardSchema, {
-    dashboardId: "ID of the dashboard to share",
-  }),
-  defineTool("unshare_dashboard", "Unshare a dashboard and revoke its public link", unshareDashboardSchema, {
-    dashboardId: "ID of the dashboard to unshare",
-  }),
-  defineTool("get_my_dashboards", "Get dashboards created by the current user", getMyDashboardsSchema, paginationSchemaDescriptions),
-  defineTool("get_favorite_dashboards", "Get dashboards marked as favorite by the current user", getFavoriteDashboardsSchema, paginationSchemaDescriptions),
-  defineTool("add_dashboard_favorite", "Add a dashboard to favorites", addDashboardFavoriteSchema, {
-    dashboardId: "ID of the dashboard to add to favorites",
-  }),
-  defineTool("remove_dashboard_favorite", "Remove a dashboard from favorites", removeDashboardFavoriteSchema, {
-    dashboardId: "ID of the dashboard to remove from favorites",
-  }),
-  defineTool("get_dashboard_tags", "Get all tags used in dashboards"),
-  defineTool("list_alerts", "List all alerts in Redash"),
-  defineTool("get_alert", "Get details of a specific alert", getAlertSchema, {
-    alertId: "ID of the alert to get",
-  }),
+  defineTool("delete_visualization", "Delete a visualization", deleteVisualization, deleteVisualizationSchema),
+  defineTool("get_schema", "Get schema of a specific data source", getSchema, getSchemaSchema),
+  defineTool("create_dashboard", "Create a new dashboard in Redash", createDashboard, createDashboardSchema),
+  defineTool("update_dashboard", "Update an existing dashboard in Redash", updateDashboard, updateDashboardSchema),
+  defineTool("get_dashboard_parameters", "Get the current dashboard parameter values and widget mappings", getDashboardParameters, getDashboardParametersSchema),
+  defineTool("update_dashboard_parameters", "Update dashboard parameter values and ordering", updateDashboardParameters, updateDashboardParametersSchema),
+  defineTool("archive_dashboard", "Archive (soft-delete) a dashboard in Redash", archiveDashboard, archiveDashboardSchema),
+  defineTool("fork_dashboard", "Fork (duplicate) an existing dashboard", forkDashboard, forkDashboardSchema),
+  defineTool("get_public_dashboard", "Get a public dashboard by its share token", getPublicDashboard, getPublicDashboardSchema),
+  defineTool("share_dashboard", "Share a dashboard and create a public link", shareDashboard, shareDashboardSchema),
+  defineTool("unshare_dashboard", "Unshare a dashboard and revoke its public link", unshareDashboard, unshareDashboardSchema),
+  defineTool("get_my_dashboards", "Get dashboards created by the current user", getMyDashboards, getMyDashboardsSchema),
+  defineTool("get_favorite_dashboards", "Get dashboards marked as favorite by the current user", getFavoriteDashboards, getFavoriteDashboardsSchema),
+  defineTool("add_dashboard_favorite", "Add a dashboard to favorites", addDashboardFavorite, addDashboardFavoriteSchema),
+  defineTool("remove_dashboard_favorite", "Remove a dashboard from favorites", removeDashboardFavorite, removeDashboardFavoriteSchema),
+  defineTool("get_dashboard_tags", "Get all tags used in dashboards", getDashboardTags),
+  defineTool("list_alerts", "List all alerts in Redash", listAlerts),
+  defineTool("get_alert", "Get details of a specific alert", getAlert, getAlertSchema),
   defineTool(
     "create_alert",
     "Create a new alert in Redash. Alerts notify you when a query result meets a specified condition.",
+    createAlert,
     createAlertSchema,
-    createAlertSchemaDescriptions
   ),
-  defineTool("update_alert", "Update an existing alert in Redash", updateAlertSchema, updateAlertSchemaDescriptions),
-  defineTool("delete_alert", "Delete an alert from Redash", deleteAlertSchema, {
-    alertId: "ID of the alert to delete",
-  }),
-  defineTool("mute_alert", "Mute an alert to temporarily stop notifications", muteAlertSchema, {
-    alertId: "ID of the alert to mute",
-  }),
-  defineTool("get_alert_subscriptions", "Get all subscriptions for an alert", getAlertSubscriptionsSchema, {
-    alertId: "ID of the alert",
-  }),
-  defineTool("add_alert_subscription", "Subscribe to an alert to receive notifications", addAlertSubscriptionSchema, {
-    alertId: "ID of the alert to subscribe to",
-    destination_id: "ID of the notification destination (optional, defaults to email)",
-  }),
-  defineTool("remove_alert_subscription", "Unsubscribe from an alert", removeAlertSubscriptionSchema, {
-    alertId: "ID of the alert",
-    subscriptionId: "ID of the subscription to remove",
-  }),
-  defineTool("fork_query", "Fork (duplicate) an existing query", forkQuerySchema, {
-    queryId: "ID of the query to fork",
-  }),
-  defineTool("get_my_queries", "Get queries created by the current user", getMyQueriesSchema, paginationSchemaDescriptions),
-  defineTool("get_recent_queries", "Get recently accessed queries", getRecentQueriesSchema, paginationSchemaDescriptions),
-  defineTool("get_query_tags", "Get all tags used in queries"),
-  defineTool("get_favorite_queries", "Get queries marked as favorite by the current user", getFavoriteQueriesSchema, paginationSchemaDescriptions),
-  defineTool("add_query_favorite", "Add a query to favorites", addQueryFavoriteSchema, {
-    queryId: "ID of the query to add to favorites",
-  }),
-  defineTool("remove_query_favorite", "Remove a query from favorites", removeQueryFavoriteSchema, {
-    queryId: "ID of the query to remove from favorites",
-  }),
-  defineTool("list_widgets", "List all widgets"),
-  defineTool("get_widget", "Get details of a specific widget", getWidgetSchema, {
-    widgetId: "ID of the widget to get",
-  }),
-  defineTool("create_widget", "Create a new widget on a dashboard", createWidgetSchema, {
-    dashboard_id: "ID of the dashboard to add the widget to",
-    visualization_id: "ID of the visualization to display (optional if text widget)",
-    text: "Text content for text widgets",
-    width: "Width of the widget (1-6)",
-    options: "Widget options",
-  }),
-  defineTool("update_widget", "Update an existing widget", updateWidgetSchema, {
-    widgetId: "ID of the widget to update",
-    visualization_id: "ID of the visualization to display",
-    text: "Text content for text widgets",
-    width: "Width of the widget (1-6)",
-    options: "Widget options",
-  }),
-  defineTool("update_widget_layout", "Move or resize a single widget by updating its grid position", updateWidgetLayoutSchema, {
-    widgetId: "ID of the widget",
-  }),
+  defineTool("update_alert", "Update an existing alert in Redash", updateAlert, updateAlertSchema),
+  defineTool("delete_alert", "Delete an alert from Redash", deleteAlert, deleteAlertSchema),
+  defineTool("mute_alert", "Mute an alert to temporarily stop notifications", muteAlert, muteAlertSchema),
+  defineTool("get_alert_subscriptions", "Get all subscriptions for an alert", getAlertSubscriptions, getAlertSubscriptionsSchema),
+  defineTool("add_alert_subscription", "Subscribe to an alert to receive notifications", addAlertSubscription, addAlertSubscriptionSchema),
+  defineTool("remove_alert_subscription", "Unsubscribe from an alert", removeAlertSubscription, removeAlertSubscriptionSchema),
+  defineTool("fork_query", "Fork (duplicate) an existing query", forkQuery, forkQuerySchema),
+  defineTool("get_my_queries", "Get queries created by the current user", getMyQueries, getMyQueriesSchema),
+  defineTool("get_recent_queries", "Get recently accessed queries", getRecentQueries, getRecentQueriesSchema),
+  defineTool("get_query_tags", "Get all tags used in queries", getQueryTags),
+  defineTool("get_favorite_queries", "Get queries marked as favorite by the current user", getFavoriteQueries, getFavoriteQueriesSchema),
+  defineTool("add_query_favorite", "Add a query to favorites", addQueryFavorite, addQueryFavoriteSchema),
+  defineTool("remove_query_favorite", "Remove a query from favorites", removeQueryFavorite, removeQueryFavoriteSchema),
+  defineTool("list_widgets", "List all widgets", listWidgets),
+  defineTool("get_widget", "Get details of a specific widget", getWidget, getWidgetSchema),
+  defineTool("create_widget", "Create a new widget on a dashboard", createWidget, createWidgetSchema),
+  defineTool("update_widget", "Update an existing widget", updateWidget, updateWidgetSchema),
+  defineTool("update_widget_layout", "Move or resize a single widget by updating its grid position", updateWidgetLayout, updateWidgetLayoutSchema),
   defineTool(
     "update_dashboard_layout",
     "Move or resize multiple widgets on a dashboard in one call and report per-widget outcomes",
+    updateDashboardLayout,
     updateDashboardLayoutSchema,
-    {
-      dashboardId: "ID of the dashboard",
-      widgets: "Widgets to move or resize",
-    }
   ),
-  defineTool("get_widget_parameter_mappings", "Get the parameter mappings for a widget", getWidgetParameterMappingsSchema, {
-    widgetId: "ID of the widget",
-  }),
-  defineTool("update_widget_parameter_mappings", "Update a widget's parameter mappings", updateWidgetParameterMappingsSchema, {
-    widgetId: "ID of the widget",
-    parameterMappings: "Parameter mappings to merge into the widget",
-    removeParameterNames: "Widget parameter mapping names to remove",
-    replaceParameterMappings: "Replace the stored mappings instead of merging",
-  }),
-  defineTool("delete_widget", "Delete a widget from a dashboard", deleteWidgetSchema, {
-    widgetId: "ID of the widget to delete",
-  }),
-  defineTool("list_query_snippets", "List all reusable query snippets"),
-  defineTool("get_query_snippet", "Get details of a specific query snippet", getQuerySnippetSchema, {
-    snippetId: "ID of the snippet to get",
-  }),
-  defineTool("create_query_snippet", "Create a new reusable query snippet", createQuerySnippetSchema, {
-    trigger: "Trigger keyword for the snippet",
-    description: "Description of the snippet",
-    snippet: "The SQL snippet content",
-  }),
-  defineTool("update_query_snippet", "Update an existing query snippet", updateQuerySnippetSchema, {
-    snippetId: "ID of the snippet to update",
-    trigger: "Trigger keyword for the snippet",
-    description: "Description of the snippet",
-    snippet: "The SQL snippet content",
-  }),
-  defineTool("delete_query_snippet", "Delete a query snippet", deleteQuerySnippetSchema, {
-    snippetId: "ID of the snippet to delete",
-  }),
-  defineTool("list_destinations", "List all alert notification destinations (email, Slack, etc.)"),
+  defineTool("get_widget_parameter_mappings", "Get the parameter mappings for a widget", getWidgetParameterMappings, getWidgetParameterMappingsSchema),
+  defineTool("update_widget_parameter_mappings", "Update a widget's parameter mappings", updateWidgetParameterMappings, updateWidgetParameterMappingsSchema),
+  defineTool("delete_widget", "Delete a widget from a dashboard", deleteWidget, deleteWidgetSchema),
+  defineTool("list_query_snippets", "List all reusable query snippets", listQuerySnippets),
+  defineTool("get_query_snippet", "Get details of a specific query snippet", getQuerySnippet, getQuerySnippetSchema),
+  defineTool("create_query_snippet", "Create a new reusable query snippet", createQuerySnippet, createQuerySnippetSchema),
+  defineTool("update_query_snippet", "Update an existing query snippet", updateQuerySnippet, updateQuerySnippetSchema),
+  defineTool("delete_query_snippet", "Delete a query snippet", deleteQuerySnippet, deleteQuerySnippetSchema),
+  defineTool("list_destinations", "List all alert notification destinations (email, Slack, etc.)", listDestinations),
 ];
 
-// ----- Register Tools -----
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: toolDefinitions,
-  };
+const redashResourceTemplate = new ResourceTemplate("redash://{type}/{id}", {
+  list: listRedashResources,
 });
 
-// Handle tool execution requests
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  logger.debug(`Tool request received: ${name} with args: ${JSON.stringify(args)}`);
-
-  try {
-    // First perform type checking for early validation to catch errors when the provided schema doesn't match expectations
-    // This prevents confusion between similar tool names like create_query and execute_query
-    if (name === "create_query") {
-      try {
-        logger.debug(`Validating create_query schema`);
-        const validatedArgs = createQuerySchema.parse(args);
-        logger.debug(`Schema validation passed for create_query: ${JSON.stringify(validatedArgs)}`);
-        return await createQuery(validatedArgs);
-      } catch (validationError) {
-        logger.error(`Schema validation failed for create_query: ${validationError}`);
-        return {
-          isError: true,
-          content: [{
-            type: "text",
-            text: `Invalid parameters for create_query: ${validationError instanceof Error ? validationError.message : String(validationError)}`
-          }]
-        };
-      }
-    } else if (name === "update_query") {
-      try {
-        logger.debug(`Validating update_query schema`);
-        const validatedArgs = updateQuerySchema.parse(args);
-        logger.debug(`Schema validation passed for update_query: ${JSON.stringify(validatedArgs)}`);
-        return await updateQuery(validatedArgs);
-      } catch (validationError) {
-        logger.error(`Schema validation failed for update_query: ${validationError}`);
-        return {
-          isError: true,
-          content: [{
-            type: "text",
-            text: `Invalid parameters for update_query: ${validationError instanceof Error ? validationError.message : String(validationError)}`
-          }]
-        };
-      }
-    }
-
-    // Switch statement for other tools
-    switch (name) {
-      case "list_queries":
-        logger.debug(`Handling list_queries`);
-        return await listQueries(listQueriesSchema.parse(args));
-
-      case "get_query":
-        logger.debug(`Handling get_query`);
-        return await getQuery(getQuerySchema.parse(args));
-
-      // create_query and update_query are already handled in the if-else above
-
-      case "get_query_parameters":
-        logger.debug(`Handling get_query_parameters`);
-        return await getQueryParameters(getQueryParametersSchema.parse(args));
-
-      case "update_query_parameters":
-        logger.debug(`Handling update_query_parameters`);
-        return await updateQueryParameters(updateQueryParametersSchema.parse(args));
-
-      case "archive_query":
-        logger.debug(`Handling archive_query`);
-        return await archiveQuery(archiveQuerySchema.parse(args));
-
-      case "list_data_sources":
-        logger.debug(`Handling list_data_sources`);
-        return await listDataSources();
-
-      case "execute_query":
-        logger.debug(`Handling execute_query`);
-        return await executeQuery(executeQuerySchema.parse(args));
-
-      case "execute_parameterized_query":
-        logger.debug(`Handling execute_parameterized_query`);
-        return await executeParameterizedQuery(executeParameterizedQuerySchema.parse(args));
-
-      case "get_query_results_csv":
-        logger.debug(`Handling get_query_results_csv`);
-        return await getQueryResultsCsv(getQueryResultsCsvSchema.parse(args));
-
-      case "list_dashboards":
-        logger.debug(`Handling list_dashboards`);
-        return await listDashboards(listDashboardsSchema.parse(args));
-
-      case "get_dashboard":
-        logger.debug(`Handling get_dashboard`);
-        return await getDashboard(getDashboardSchema.parse(args));
-
-      case "get_dashboard_layout":
-        logger.debug(`Handling get_dashboard_layout`);
-        return await getDashboardLayout(getDashboardLayoutSchema.parse(args));
-
-      case "get_dashboard_by_slug":
-        logger.debug(`Handling get_dashboard_by_slug`);
-        return await getDashboardBySlug(getDashboardBySlugSchema.parse(args));
-
-      case "get_visualization":
-        logger.debug(`Handling get_visualization`);
-        return await getVisualization(getVisualizationSchema.parse(args));
-
-      case "execute_adhoc_query":
-        logger.debug(`Handling execute_adhoc_query`);
-        return await executeAdhocQuery(executeAdhocQuerySchema.parse(args));
-
-      case "create_visualization":
-        return await createVisualization(createVisualizationSchema.parse(args));
-
-      case "update_visualization":
-        return await updateVisualization(updateVisualizationSchema.parse(args));
-
-      case "update_chart_visualization":
-        return await updateChartVisualization(chartVisualizationUpdateSchema.parse(args));
-
-      case "delete_visualization":
-        return await deleteVisualization(deleteVisualizationSchema.parse(args));
-
-      case "get_schema":
-        logger.debug(`Handling get_schema`);
-        return await getSchema(getSchemaSchema.parse(args));
-
-      // Dashboard tools
-      case "create_dashboard":
-        logger.debug(`Handling create_dashboard`);
-        return await createDashboard(createDashboardSchema.parse(args));
-
-      case "update_dashboard":
-        logger.debug(`Handling update_dashboard`);
-        return await updateDashboard(updateDashboardSchema.parse(args));
-
-      case "get_dashboard_parameters":
-        logger.debug(`Handling get_dashboard_parameters`);
-        return await getDashboardParameters(getDashboardParametersSchema.parse(args));
-
-      case "update_dashboard_parameters":
-        logger.debug(`Handling update_dashboard_parameters`);
-        return await updateDashboardParameters(updateDashboardParametersSchema.parse(args));
-
-      case "archive_dashboard":
-        logger.debug(`Handling archive_dashboard`);
-        return await archiveDashboard(archiveDashboardSchema.parse(args));
-
-      case "fork_dashboard":
-        logger.debug(`Handling fork_dashboard`);
-        return await forkDashboard(forkDashboardSchema.parse(args));
-
-      case "get_public_dashboard":
-        logger.debug(`Handling get_public_dashboard`);
-        return await getPublicDashboard(getPublicDashboardSchema.parse(args));
-
-      case "share_dashboard":
-        logger.debug(`Handling share_dashboard`);
-        return await shareDashboard(shareDashboardSchema.parse(args));
-
-      case "unshare_dashboard":
-        logger.debug(`Handling unshare_dashboard`);
-        return await unshareDashboard(unshareDashboardSchema.parse(args));
-
-      case "get_my_dashboards":
-        logger.debug(`Handling get_my_dashboards`);
-        return await getMyDashboards(getMyDashboardsSchema.parse(args));
-
-      case "get_favorite_dashboards":
-        logger.debug(`Handling get_favorite_dashboards`);
-        return await getFavoriteDashboards(getFavoriteDashboardsSchema.parse(args));
-
-      case "add_dashboard_favorite":
-        logger.debug(`Handling add_dashboard_favorite`);
-        return await addDashboardFavorite(addDashboardFavoriteSchema.parse(args));
-
-      case "remove_dashboard_favorite":
-        logger.debug(`Handling remove_dashboard_favorite`);
-        return await removeDashboardFavorite(removeDashboardFavoriteSchema.parse(args));
-
-      case "get_dashboard_tags":
-        logger.debug(`Handling get_dashboard_tags`);
-        return await getDashboardTags();
-
-      // Alert tools
-      case "list_alerts":
-        logger.debug(`Handling list_alerts`);
-        return await listAlerts();
-
-      case "get_alert":
-        logger.debug(`Handling get_alert`);
-        return await getAlert(getAlertSchema.parse(args));
-
-      case "create_alert":
-        logger.debug(`Handling create_alert`);
-        return await createAlert(createAlertSchema.parse(args));
-
-      case "update_alert":
-        logger.debug(`Handling update_alert`);
-        return await updateAlert(updateAlertSchema.parse(args));
-
-      case "delete_alert":
-        logger.debug(`Handling delete_alert`);
-        return await deleteAlert(deleteAlertSchema.parse(args));
-
-      case "mute_alert":
-        logger.debug(`Handling mute_alert`);
-        return await muteAlert(muteAlertSchema.parse(args));
-
-      case "get_alert_subscriptions":
-        logger.debug(`Handling get_alert_subscriptions`);
-        return await getAlertSubscriptions(getAlertSubscriptionsSchema.parse(args));
-
-      case "add_alert_subscription":
-        logger.debug(`Handling add_alert_subscription`);
-        return await addAlertSubscription(addAlertSubscriptionSchema.parse(args));
-
-      case "remove_alert_subscription":
-        logger.debug(`Handling remove_alert_subscription`);
-        return await removeAlertSubscription(removeAlertSubscriptionSchema.parse(args));
-
-      // Additional Query tools
-      case "fork_query":
-        logger.debug(`Handling fork_query`);
-        return await forkQuery(forkQuerySchema.parse(args));
-
-      case "get_my_queries":
-        logger.debug(`Handling get_my_queries`);
-        return await getMyQueries(getMyQueriesSchema.parse(args));
-
-      case "get_recent_queries":
-        logger.debug(`Handling get_recent_queries`);
-        return await getRecentQueries(getRecentQueriesSchema.parse(args));
-
-      case "get_query_tags":
-        logger.debug(`Handling get_query_tags`);
-        return await getQueryTags();
-
-      case "get_favorite_queries":
-        logger.debug(`Handling get_favorite_queries`);
-        return await getFavoriteQueries(getFavoriteQueriesSchema.parse(args));
-
-      case "add_query_favorite":
-        logger.debug(`Handling add_query_favorite`);
-        return await addQueryFavorite(addQueryFavoriteSchema.parse(args));
-
-      case "remove_query_favorite":
-        logger.debug(`Handling remove_query_favorite`);
-        return await removeQueryFavorite(removeQueryFavoriteSchema.parse(args));
-
-      // Widget tools
-      case "list_widgets":
-        logger.debug(`Handling list_widgets`);
-        return await listWidgets();
-
-      case "get_widget":
-        logger.debug(`Handling get_widget`);
-        return await getWidget(getWidgetSchema.parse(args));
-
-      case "create_widget":
-        logger.debug(`Handling create_widget`);
-        return await createWidget(createWidgetSchema.parse(args));
-
-      case "update_widget":
-        logger.debug(`Handling update_widget`);
-        return await updateWidget(updateWidgetSchema.parse(args));
-
-      case "update_widget_layout":
-        logger.debug(`Handling update_widget_layout`);
-        return await updateWidgetLayout(updateWidgetLayoutSchema.parse(args));
-
-      case "update_dashboard_layout":
-        logger.debug(`Handling update_dashboard_layout`);
-        return await updateDashboardLayout(updateDashboardLayoutSchema.parse(args));
-
-      case "get_widget_parameter_mappings":
-        logger.debug(`Handling get_widget_parameter_mappings`);
-        return await getWidgetParameterMappings(getWidgetParameterMappingsSchema.parse(args));
-
-      case "update_widget_parameter_mappings":
-        logger.debug(`Handling update_widget_parameter_mappings`);
-        return await updateWidgetParameterMappings(updateWidgetParameterMappingsSchema.parse(args));
-
-      case "delete_widget":
-        logger.debug(`Handling delete_widget`);
-        return await deleteWidget(deleteWidgetSchema.parse(args));
-
-      // Query Snippet tools
-      case "list_query_snippets":
-        logger.debug(`Handling list_query_snippets`);
-        return await listQuerySnippets();
-
-      case "get_query_snippet":
-        logger.debug(`Handling get_query_snippet`);
-        return await getQuerySnippet(getQuerySnippetSchema.parse(args));
-
-      case "create_query_snippet":
-        logger.debug(`Handling create_query_snippet`);
-        return await createQuerySnippet(createQuerySnippetSchema.parse(args));
-
-      case "update_query_snippet":
-        logger.debug(`Handling update_query_snippet`);
-        return await updateQuerySnippet(updateQuerySnippetSchema.parse(args));
-
-      case "delete_query_snippet":
-        logger.debug(`Handling delete_query_snippet`);
-        return await deleteQuerySnippet(deleteQuerySnippetSchema.parse(args));
-
-      // Destination tools
-      case "list_destinations":
-        logger.debug(`Handling list_destinations`);
-        return await listDestinations();
-
-      default:
-        logger.error(`Unknown tool requested: ${name}`);
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Unknown tool: ${name}`
-            }
-          ]
-        };
-    }
-  } catch (error) {
-    logger.error(`Error executing tool ${name}: ${error instanceof Error ? error.message : String(error)}`);
-    if (error instanceof z.ZodError) {
-      logger.error(`Validation error details: ${JSON.stringify(error.errors)}`);
-    }
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: `Error executing tool ${name}: ${error instanceof Error ? error.message : String(error)}`
-        }
-      ]
-    };
+export function createRedashMcpServer(): McpServer {
+  const server = new McpServer({
+    name: "redash-mcp",
+    version: "1.1.0",
+  });
+
+  for (const tool of toolDefinitions) {
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      },
+      async (args: Record<string, unknown>) => {
+        logger.debug(`Tool request received: ${tool.name} with args: ${JSON.stringify(args)}`);
+        return await tool.handler(args) as CallToolResult;
+      },
+    );
   }
-});
 
-// Start the server with stdio transport
-async function main() {
-  try {
-    const transport = new StdioServerTransport();
+  server.registerResource(
+    "redash-resource",
+    redashResourceTemplate,
+    {
+      description: "A saved Redash query or dashboard",
+    },
+    readRedashResource,
+  );
 
-    logger.info("Starting Redash MCP server...");
-    await server.connect(transport);
-    logger.setServer(server);
-    logger.info("Redash MCP server connected!");
-  } catch (error) {
-    logger.error(`Failed to start server: ${error}`);
-    process.exit(1);
-  }
+  return server;
 }
 
-main();
+// Start the server with stdio transport
+export async function startStdioServer(options: ServeStdioOptions = {}): Promise<StdioServerHandle> {
+  logger.info("Starting Redash MCP server...");
+  const handle = serveStdio(
+    () => {
+      const server = createRedashMcpServer();
+      logger.setServer(server);
+      return server;
+    },
+    {
+      ...options,
+      onerror: (error) => {
+        options.onerror?.(error);
+        logger.error(`Stdio transport error: ${error.message}`);
+      },
+    },
+  );
+  logger.info("Redash MCP stdio server ready!");
+  return handle;
+}

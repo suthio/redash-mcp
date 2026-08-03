@@ -14,16 +14,21 @@ export enum LogLevel {
   EMERGENCY = "emergency"
 }
 
+interface LoggingServer {
+  sendLoggingMessage(params: { level: LogLevel; data: string }): Promise<void>;
+}
+
 /**
  * Logger class that outputs to both console and can send notifications to clients
  */
 export class Logger {
-  private server: any | null = null;
+  private server: LoggingServer | null = null;
 
   /**
-   * Sets the MCP server instance to enable sending log notifications
+   * Sets the MCP server instance to enable sending log notifications;
+   * pass null to detach a closed server and log to stderr only.
    */
-  setServer(server: any): void {
+  setServer(server: LoggingServer | null): void {
     this.server = server;
   }
 
@@ -62,19 +67,18 @@ export class Logger {
     // Always output to stderr for local debugging
     console.error(`[${level.toUpperCase()}] ${message}`);
 
-    // If server is set and supports logging notifications, send them
-    if (this.server && typeof this.server.notification === 'function') {
-      try {
-        this.server.notification({
-          method: "notifications/logging",
-          params: {
-            level: level,
-            data: message
-          }
-        });
-      } catch (err) {
-        // If notification fails, just log to console
+    if (this.server) {
+      const reportSendFailure = (err: unknown) => {
         console.error(`Failed to send log notification: ${err}`);
+      };
+
+      try {
+        void this.server.sendLoggingMessage({
+          level,
+          data: message,
+        }).catch(reportSendFailure);
+      } catch (err) {
+        reportSendFailure(err);
       }
     }
   }

@@ -48,20 +48,17 @@ describe('Logger', () => {
 
   describe('server notifications', () => {
     it('should send notification when server is set', () => {
-      const mockNotification = jest.fn();
+      const sendLoggingMessage = jest.fn(() => Promise.resolve());
       const mockServer = {
-        notification: mockNotification,
+        sendLoggingMessage,
       };
 
       logger.setServer(mockServer);
       logger.info('Test message');
 
-      expect(mockNotification).toHaveBeenCalledWith({
-        method: 'notifications/logging',
-        params: {
-          level: LogLevel.INFO,
-          data: 'Test message',
-        },
+      expect(sendLoggingMessage).toHaveBeenCalledWith({
+        level: LogLevel.INFO,
+        data: 'Test message',
       });
     });
 
@@ -72,12 +69,12 @@ describe('Logger', () => {
       // No error should be thrown
     });
 
-    it('should handle notification errors gracefully', () => {
-      const mockNotification = jest.fn().mockImplementation(() => {
+    it('should handle synchronous notification errors gracefully', () => {
+      const sendLoggingMessage = jest.fn((): Promise<void> => {
         throw new Error('Notification error');
       });
       const mockServer = {
-        notification: mockNotification,
+        sendLoggingMessage,
       };
 
       logger.setServer(mockServer);
@@ -89,21 +86,12 @@ describe('Logger', () => {
       );
     });
 
-    it('should handle server without notification method', () => {
-      const mockServer = {};
-
-      logger.setServer(mockServer);
-      logger.info('Test message');
-
-      expect(consoleErrorSpy).toHaveBeenCalledWith('[INFO] Test message');
-      // Should not throw error
-    });
   });
 
   describe('log method', () => {
     it('should always log to console.error', () => {
       const mockServer = {
-        notification: jest.fn(),
+        sendLoggingMessage: jest.fn(() => Promise.resolve()),
       };
 
       logger.setServer(mockServer);
@@ -138,10 +126,10 @@ describe('Logger', () => {
   describe('setServer', () => {
     it('should update server instance', () => {
       const mockServer1 = {
-        notification: jest.fn(),
+        sendLoggingMessage: jest.fn(() => Promise.resolve()),
       };
       const mockServer2 = {
-        notification: jest.fn(),
+        sendLoggingMessage: jest.fn(() => Promise.resolve()),
       };
 
       logger.setServer(mockServer1);
@@ -150,8 +138,8 @@ describe('Logger', () => {
       logger.setServer(mockServer2);
       logger.info('Message 2');
 
-      expect(mockServer1.notification).toHaveBeenCalledTimes(1);
-      expect(mockServer2.notification).toHaveBeenCalledTimes(1);
+      expect(mockServer1.sendLoggingMessage).toHaveBeenCalledTimes(1);
+      expect(mockServer2.sendLoggingMessage).toHaveBeenCalledTimes(1);
     });
   });
 });

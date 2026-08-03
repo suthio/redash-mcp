@@ -13,6 +13,7 @@ export default {
       },
     ],
   },
+  setupFiles: ['<rootDir>/src/__tests__/setupEnv.ts'],
   testMatch: [
     '**/__tests__/**/*.test.ts',
     '**/?(*.)+(spec|test).ts'

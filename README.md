@@ -38,6 +38,12 @@ Optional variables:
 - `REDASH_MAX_RESULTS`: Maximum number of results to return (default: 1000)
 - `REDASH_EXTRA_HEADERS`: Extra HTTP headers to include with every Redash request. Accepts either a JSON object string or a semicolon/comma-separated list of `key=value` pairs.
 - `REDASH_SOCKS_PROXY`: SOCKS proxy URL for routing requests through a proxy (e.g., `socks5h://localhost:1080`). Use `socks5h://` (with `h`) to delegate DNS resolution to the proxy, which is required for internal hostnames that don't resolve on the local machine.
+- `MCP_TRANSPORT`: MCP transport to use. Supported values are `stdio`, `http`, and `streamable-http` (default: `stdio`).
+- `MCP_HTTP_HOST`: Host for Streamable HTTP mode (default: `127.0.0.1`).
+- `MCP_HTTP_PORT`: Port for Streamable HTTP mode (default: `3000`).
+- `MCP_HTTP_PATH`: Streamable HTTP endpoint path (default: `/mcp`).
+- `MCP_HTTP_ALLOWED_HOSTS`: Comma-separated Host header allowlist for Streamable HTTP mode. Values are hostnames without a scheme, port, path, or wildcard.
+- `MCP_HTTP_ALLOWED_ORIGINS`: Comma-separated browser Origin hostname allowlist. Values use the same hostname-only format and also control CORS responses. Set an empty value to reject every request that includes an `Origin` header.
 
 Examples:
 
@@ -86,6 +92,8 @@ Notes:
    pnpm start
    ```
 
+   The default transport is stdio, which is the mode expected by most desktop MCP clients. The stdio entrypoint accepts both 2025-era MCP clients and clients that negotiate the current protocol.
+
 ## Usage with Claude for Desktop
 
 To use this MCP server with Claude for Desktop, configure it in your Claude for Desktop configuration file:
@@ -113,41 +121,104 @@ Add the following configuration (edit paths as needed):
 }
 ```
 
+## Streamable HTTP Transport
+
+The server can also run as a stateless Streamable HTTP MCP server. The HTTP entrypoint is a Hono application served by `@hono/node-server`; environment variables configure the listener:
+
+```bash
+REDASH_URL=https://your-redash-instance.com \
+REDASH_API_KEY=your_api_key \
+MCP_TRANSPORT=http \
+pnpm start
+```
+
+This starts `POST http://127.0.0.1:3000/mcp` by default. CLI flags override environment variables:
+
+```bash
+REDASH_URL=https://your-redash-instance.com \
+REDASH_API_KEY=your_api_key \
+pnpm start --transport http --host 127.0.0.1 --port 3333 --path /mcp
+```
+
+For a non-local bind behind an authenticated, TLS-terminating reverse proxy, explicitly configure which request hosts and browser origins may reach the server. The equivalent CLI options are `--allowed-hosts` and `--allowed-origins`.
+
+```bash
+REDASH_URL=https://redash.example.com \
+REDASH_API_KEY=your_api_key \
+MCP_TRANSPORT=http \
+MCP_HTTP_HOST=0.0.0.0 \
+MCP_HTTP_ALLOWED_HOSTS=mcp.example.com \
+MCP_HTTP_ALLOWED_ORIGINS=app.example.com \
+pnpm start
+```
+
+| Who uses the server | MCP URL | Allowed Host header | Allowed browser Origin |
+| --- | --- | --- | --- |
+| Local MCP client | `http://127.0.0.1:3000/mcp` | `127.0.0.1` | `localhost`, `127.0.0.1`, `[::1]` |
+| Local Docker client | `http://localhost:3000/mcp` | `localhost` | `localhost`, `127.0.0.1`, `[::1]` |
+| Browser app at `https://app.example.com` through an authenticated reverse proxy | `https://mcp.example.com/mcp` | `mcp.example.com` | `app.example.com` |
+
+Host and Origin matching is case-insensitive and port-agnostic. For example, allowing `app.example.com` accepts the browser Origin `https://app.example.com:8443`. In HTTP mode, binding `MCP_HTTP_HOST` to a non-local address fails at startup unless both allowlist settings are explicitly present.
+
+Host and Origin allowlists protect against DNS rebinding and unwanted browser origins; they do not authenticate MCP clients. Do not expose the server listener directly to the internet. For `https://mcp.example.com/mcp`, keep the listener on a private network and require authentication at the reverse proxy or gateway.
+
+HTTP mode is stateless: the server does not issue `Mcp-Session-Id`, does not provide a standalone GET SSE stream, and handles each `POST /mcp` with a fresh MCP server instance. Both current MCP clients and 2025-era Streamable HTTP clients use that same URL. `GET /mcp` and `DELETE /mcp` return `405 Method Not Allowed`.
+
+The default bind is localhost-only (`127.0.0.1`) with Host and Origin protection. Browser requests from allowed origins receive CORS response headers; other origins are rejected with `403 Forbidden`.
+
+`GET http://127.0.0.1:3000/healthz` returns `200 OK` with the body `ok` for lightweight health checks. It uses the same Host and Origin allowlists as the MCP endpoint and does not contact Redash. If `MCP_HTTP_PATH=/healthz`, that URL remains the MCP endpoint and the standalone health check is disabled with a startup warning.
+
+The CLI handles `SIGINT` and `SIGTERM` gracefully. For example, `docker stop` sends `SIGTERM`; the server closes active MCP streams and then waits for the HTTP listener to stop before the process exits.
+
+## Docker
+
+Container images are published to GitHub Container Registry for both `linux/amd64` and `linux/arm64`.
+
+```bash
+docker run --rm -p 127.0.0.1:3000:3000 \
+  -e REDASH_URL=https://your-redash-instance.com \
+  -e REDASH_API_KEY=your_api_key \
+  ghcr.io/suthio/redash-mcp:latest
+```
+
+The container runs Streamable HTTP internally on `0.0.0.0:3000`, while the example publishes that port on the host's loopback interface only. Its default Host and Origin allowlists accept localhost access. When placing the container behind an authenticated reverse proxy or a private cluster service, set `MCP_HTTP_ALLOWED_HOSTS` and `MCP_HTTP_ALLOWED_ORIGINS` to the concrete DNS names used by clients.
+Published images are signed with keyless cosign.
+
 ## Available Tools
 
 ### Query Management
-- `list-queries`: List all available queries in Redash
-- `get-query`: Get details of a specific query 
-- `create-query`: Create a new query in Redash
-- `update-query`: Update an existing query in Redash
-- `get-query-parameters`: Inspect saved query parameter definitions
-- `update-query-parameters`: Update saved query parameter definitions
-- `archive-query`: Archive (soft-delete) a query
-- `list-data-sources`: List all available data sources
+- `list_queries`: List all available queries in Redash
+- `get_query`: Get details of a specific query
+- `create_query`: Create a new query in Redash
+- `update_query`: Update an existing query in Redash
+- `get_query_parameters`: Inspect saved query parameter definitions
+- `update_query_parameters`: Update saved query parameter definitions
+- `archive_query`: Archive (soft-delete) a query
+- `list_data_sources`: List all available data sources
 
 ### Query Execution
-- `execute-query`: Execute a query and return results, with optional `maxAge`
-- `execute-parameterized-query`: Execute a saved parameterized query with type-aware value coercion, saved defaults, and optional `maxAge`
-- `execute-adhoc-query`: Execute an ad-hoc query without saving it to Redash
-- `get-query-results-csv`: Get query results in CSV format (supports optional refresh for latest data)
+- `execute_query`: Execute a query and return results, with optional `maxAge`
+- `execute_parameterized_query`: Execute a saved parameterized query with type-aware value coercion, saved defaults, and optional `maxAge`
+- `execute_adhoc_query`: Execute an ad-hoc query without saving it to Redash
+- `get_query_results_csv`: Get query results in CSV format (supports optional refresh for latest data)
 
 ### Dashboard Management
-- `list-dashboards`: List all available dashboards
-- `get-dashboard`: Get dashboard details and visualizations 
-- `get-dashboard-layout`: Inspect widget positions, sizes, and visibility on a dashboard
-- `get-visualization`: Get details of a specific visualization
-- `get-dashboard-parameters`: Inspect dashboard parameter values and widget mappings
-- `update-dashboard-parameters`: Update dashboard parameter values and order
-- `update-dashboard-layout`: Move or resize multiple widgets in one call
-- `update-widget-layout`: Move or resize a single widget
-- `get-widget-parameter-mappings`: Inspect a widget's parameter mappings
-- `update-widget-parameter-mappings`: Update a widget's parameter mappings
+- `list_dashboards`: List all available dashboards
+- `get_dashboard`: Get dashboard details and visualizations
+- `get_dashboard_layout`: Inspect widget positions, sizes, and visibility on a dashboard
+- `get_visualization`: Get details of a specific visualization
+- `get_dashboard_parameters`: Inspect dashboard parameter values and widget mappings
+- `update_dashboard_parameters`: Update dashboard parameter values and order
+- `update_dashboard_layout`: Move or resize multiple widgets in one call
+- `update_widget_layout`: Move or resize a single widget
+- `get_widget_parameter_mappings`: Inspect a widget's parameter mappings
+- `update_widget_parameter_mappings`: Update a widget's parameter mappings
 
 ### Visualization Management
-- `create-visualization`: Create a new visualization for a query
-- `update-visualization`: Update an existing visualization
-- `update-chart-visualization`: Patch chart-specific options like `globalSeriesType`, `columnMapping`, `seriesOptions`, `legend`, and axis settings
-- `delete-visualization`: Delete a visualization
+- `create_visualization`: Create a new visualization for a query
+- `update_visualization`: Update an existing visualization
+- `update_chart_visualization`: Patch chart-specific options like `globalSeriesType`, `columnMapping`, `seriesOptions`, `legend`, and axis settings
+- `delete_visualization`: Delete a visualization
 
 ## Development
 
