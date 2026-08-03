@@ -69,6 +69,21 @@ describe("Redash MCP server", () => {
           q: { description: "Search query" },
         },
       });
+
+      const getSchema = result.tools.find((tool) => tool.name === "get_schema");
+      expect(getSchema?.inputSchema).toMatchObject({
+        properties: {
+          pageSize: {
+            default: 25,
+            maximum: 100,
+            description: "Number of tables per page (max 100)",
+          },
+        },
+      });
+      expect(getSchema?.inputSchema).not.toHaveProperty("properties.location");
+      expect(getSchema?.description).toContain(
+        "Query Results data sources are unsupported because their tables are created dynamically",
+      );
     } finally {
       await connection.close();
     }
@@ -89,6 +104,85 @@ describe("Redash MCP server", () => {
 
       expect(result.isError).not.toBe(true);
       expect(getQuerySpy).toHaveBeenCalledWith(42);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("passes pagination and search arguments through get_schema", async () => {
+    const schemaPage = {
+      page: 2,
+      pageSize: 10,
+      hasMore: false,
+      nextPage: null,
+      schema: [{ name: "users", columns: [{ name: "id", type: "integer" }] }],
+    };
+    const getSchemaPageSpy = jest
+      .spyOn(redashClient, "getSchemaPage")
+      .mockResolvedValue(schemaPage as never);
+    const connection = await connectDirectClient();
+
+    try {
+      const result = await connection.client.callTool({
+        name: "get_schema",
+        arguments: { dataSourceId: "3", page: "2", pageSize: "10", search: "user" },
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(getSchemaPageSpy).toHaveBeenCalledWith(3, 2, 10, "user");
+      const [content] = result.content as Array<{ type: string; text: string }>;
+      expect(JSON.parse(content.text)).toEqual(schemaPage);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("returns a pending Redash schema job unchanged", async () => {
+    const schemaJob = {
+      job: {
+        id: "schema-job-123",
+        updated_at: 0,
+        status: 1,
+        error: "",
+        result: null,
+        query_result_id: null,
+      },
+    };
+    jest.spyOn(redashClient, "getSchemaPage").mockResolvedValue(schemaJob);
+    const connection = await connectDirectClient();
+
+    try {
+      const result = await connection.client.callTool({
+        name: "get_schema",
+        arguments: { dataSourceId: 3 },
+      });
+
+      expect(result.isError).not.toBe(true);
+      const [content] = result.content as Array<{ type: string; text: string }>;
+      expect(JSON.parse(content.text)).toEqual(schemaJob);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("returns actionable guidance when a data source has no static schema", async () => {
+    jest.spyOn(redashClient, "getSchemaPage").mockRejectedValue(new Error(
+      "Data source 13 is a Query Results data source and does not expose a static schema; "
+      + "use execute_adhoc_query with query_<query_id> or cached_query_<query_id> instead",
+    ));
+    const connection = await connectDirectClient();
+
+    try {
+      const result = await connection.client.callTool({
+        name: "get_schema",
+        arguments: { dataSourceId: 13 },
+      });
+
+      expect(result.isError).toBe(true);
+      const [content] = result.content as Array<{ type: string; text: string }>;
+      expect(content.text).toContain("Query Results data source");
+      expect(content.text).toContain("execute_adhoc_query");
+      expect(content.text).toContain("query_<query_id>");
     } finally {
       await connection.close();
     }
