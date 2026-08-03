@@ -7,6 +7,11 @@ import { jest } from "@jest/globals";
 import { LOOPBACK_ALLOWED_HOSTNAMES } from "../config.js";
 import { startHttpServer, type HttpServerHandle } from "../httpServer.js";
 import { toolDefinitions } from "../index.js";
+import {
+  hasEmbeddedPrometheusMetrics,
+  initializeTelemetry,
+  shutdownTelemetry,
+} from "../telemetry.js";
 import { CLIENT_VERSION_MATRIX, MODERN_CLIENT_OPTIONS } from "./clientFixtures.js";
 
 type HttpServerConfig = Parameters<typeof startHttpServer>[0];
@@ -94,6 +99,29 @@ describe("HTTP MCP server", () => {
 
     const response = await fetch(`${serverInfo.baseUrl}/not-mcp`);
     expect(response.status).toBe(404);
+  });
+
+  it("keeps /metrics available for MCP when it collides with embedded Prometheus", async () => {
+    const previousExporter = process.env.OTEL_METRICS_EXPORTER;
+    process.env.OTEL_METRICS_EXPORTER = "prometheus";
+
+    try {
+      await initializeTelemetry({ transport: "http" });
+      expect(hasEmbeddedPrometheusMetrics()).toBe(true);
+      const serverInfo = await startTestServer({ path: "/metrics" });
+
+      expect(hasEmbeddedPrometheusMetrics()).toBe(false);
+      const getResponse = await fetch(`${serverInfo.baseUrl}/metrics`);
+      expect(getResponse.status).toBe(405);
+      expect(getResponse.headers.get("allow")).toBe("POST");
+    } finally {
+      await shutdownTelemetry();
+      if (previousExporter === undefined) {
+        delete process.env.OTEL_METRICS_EXPORTER;
+      } else {
+        process.env.OTEL_METRICS_EXPORTER = previousExporter;
+      }
+    }
   });
 
   it("rejects non-local browser origins", async () => {

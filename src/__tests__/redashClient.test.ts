@@ -1,6 +1,8 @@
 import { RedashClient } from '../redashClient.js';
 import axios from 'axios';
 import { jest } from '@jest/globals';
+import { logger } from '../logger.js';
+import { isToolContentCaptureEnabled } from '../telemetry.js';
 
 // Mock axios
 jest.mock('axios');
@@ -16,6 +18,11 @@ jest.mock('../logger.js', () => ({
     log: jest.fn(),
   },
 }));
+jest.mock('../telemetry.js', () => ({
+  isToolContentCaptureEnabled: jest.fn(),
+}));
+
+const mockedContentCapture = jest.mocked(isToolContentCaptureEnabled);
 
 describe('RedashClient', () => {
   let client: RedashClient;
@@ -27,6 +34,7 @@ describe('RedashClient', () => {
     process.env.REDASH_API_KEY = 'test-api-key';
     process.env.REDASH_TIMEOUT = '30000';
     delete process.env.REDASH_EXTRA_HEADERS;
+    mockedContentCapture.mockReturnValue(false);
 
     // Setup axios mock
     mockAxiosInstance = {
@@ -231,6 +239,34 @@ describe('RedashClient', () => {
       expect(result).toEqual(mockResponse.data);
     });
 
+    it('keeps successful query content out of logs even when content capture is enabled', async () => {
+      mockedContentCapture.mockReturnValue(true);
+      const queryData = {
+        name: 'Revenue details',
+        data_source_id: 1,
+        query: 'SELECT secret_value FROM private_table',
+        description: 'Internal revenue analysis',
+        options: { parameters: [{ name: 'customer_id', value: 42 }] },
+      };
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 123, ...queryData } });
+
+      await client.createQuery(queryData);
+
+      const creatingLog = jest.mocked(logger.info).mock.calls.find(
+        ([message]) => message === 'Creating Redash query',
+      );
+      expect(creatingLog?.[1]).toMatchObject({
+        'http.request.method': 'POST',
+        'url.path': '/api/queries',
+        'redash.data_source.id': 1,
+        'redash.request.header.names': [],
+      });
+      const exportedFields = JSON.stringify(jest.mocked(logger.info).mock.calls.map(([, fields]) => fields));
+      expect(exportedFields).not.toContain('SELECT secret_value');
+      expect(exportedFields).not.toContain('Internal revenue analysis');
+      expect(exportedFields).not.toContain('customer_id');
+    });
+
     it('should handle API errors', async () => {
       const queryData = {
         name: 'New Query',
@@ -251,6 +287,59 @@ describe('RedashClient', () => {
       await expect(client.createQuery(queryData)).rejects.toThrow(
         /Redash API error \(400\)/
       );
+
+      const failureLog = jest.mocked(logger.error).mock.calls.find(
+        ([message]) => message === 'Redash create-query request failed',
+      );
+      expect(failureLog?.[1]).toMatchObject({
+        'http.request.method': 'POST',
+        'url.path': '/api/queries',
+        'http.response.status_code': 400,
+      });
+      expect(failureLog?.[1]).not.toHaveProperty('redash.request.body');
+      expect(failureLog?.[1]).not.toHaveProperty('redash.response.body');
+    });
+
+    it('captures Redash request and response bodies only after content opt-in', async () => {
+      mockedContentCapture.mockReturnValue(true);
+      const queryData = {
+        name: 'Private query',
+        data_source_id: 7,
+        query: 'SELECT secret_value FROM private_table',
+        description: 'Restricted report',
+        options: { parameters: [{ name: 'account_id', value: 42 }] },
+      };
+      const axiosError = {
+        message: 'Request failed',
+        request: {},
+        response: {
+          status: 400,
+          data: { message: 'Invalid query', detail: 'SELECT secret_value failed' },
+        },
+        config: {
+          headers: { Authorization: 'Key must-not-be-exported' },
+        },
+      };
+      mockAxiosInstance.post.mockRejectedValue(axiosError);
+
+      await expect(client.createQuery(queryData)).rejects.toThrow(/Redash API error \(400\)/);
+
+      const failureLog = jest.mocked(logger.error).mock.calls.find(
+        ([message]) => message === 'Redash create-query request failed',
+      );
+      expect(failureLog?.[1]).toMatchObject({
+        'http.response.status_code': 400,
+        'redash.request.body': expect.objectContaining({
+          query: 'SELECT secret_value FROM private_table',
+          description: 'Restricted report',
+          options: { parameters: [{ name: 'account_id', value: 42 }] },
+        }),
+        'redash.response.body': {
+          message: 'Invalid query',
+          detail: 'SELECT secret_value failed',
+        },
+      });
+      expect(JSON.stringify(failureLog?.[1])).not.toContain('must-not-be-exported');
     });
   });
 
@@ -388,6 +477,39 @@ describe('RedashClient', () => {
 
       expect(mockAxiosInstance.get).toHaveBeenCalledWith(`/api/jobs/${jobId}`);
       expect(result).toEqual(mockPollResponse.data.job.result);
+    });
+
+    it('should preserve Redash job failures without wrapping their message', async () => {
+      mockAxiosInstance.post.mockResolvedValue({ data: { job: { id: 'job-failed' } } });
+      mockAxiosInstance.get.mockResolvedValue({
+        data: { job: { status: 4, error: 'SELECT private_value failed' } },
+      });
+
+      await expect(client.executeQuery(123)).rejects.toThrow('Query execution failed');
+
+      const failureLog = jest.mocked(logger.error).mock.calls.find(
+        ([message]) => message === 'Redash query job failed',
+      );
+      expect(failureLog?.[1]).toMatchObject({ 'redash.job.id': 'job-failed' });
+      expect(failureLog?.[1]).not.toHaveProperty('redash.job.error');
+    });
+
+    it('captures the Redash job error after content opt-in', async () => {
+      mockedContentCapture.mockReturnValue(true);
+      mockAxiosInstance.post.mockResolvedValue({ data: { job: { id: 'job-failed' } } });
+      mockAxiosInstance.get.mockResolvedValue({
+        data: { job: { status: 4, error: 'SELECT private_value failed' } },
+      });
+
+      await expect(client.executeQuery(123)).rejects.toThrow('Query execution failed');
+
+      const failureLog = jest.mocked(logger.error).mock.calls.find(
+        ([message]) => message === 'Redash query job failed',
+      );
+      expect(failureLog?.[1]).toMatchObject({
+        'redash.job.id': 'job-failed',
+        'redash.job.error': 'SELECT private_value failed',
+      });
     });
   });
 

@@ -1,12 +1,26 @@
-import type { Server as HttpServer } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { promisify } from "node:util";
-import { serve } from "@hono/node-server";
+import { getRequestListener } from "@hono/node-server";
 import { createMcpHonoApp } from "@modelcontextprotocol/hono";
-import { createMcpHandler, validateOriginHeader } from "@modelcontextprotocol/server";
+import {
+  createMcpHandler,
+  validateHostHeader,
+  validateOriginHeader,
+} from "@modelcontextprotocol/server";
 import { cors } from "hono/cors";
 import { createRedashMcpServer } from "./index.js";
 import { logger } from "./logger.js";
+import {
+  disableEmbeddedPrometheusMetrics,
+  handlePrometheusMetricsRequest,
+  hasEmbeddedPrometheusMetrics,
+} from "./telemetry.js";
 import { formatError } from "./utils.js";
 
 // @modelcontextprotocol/hono stashes the request body it already parsed with
@@ -39,10 +53,21 @@ export async function startHttpServer(config: HttpServerConfig): Promise<HttpSer
     allowedHosts: config.allowedHosts,
     allowedOrigins: config.allowedOrigins,
   });
-  const handler = createMcpHandler(createRedashMcpServer, {
-    legacy: "stateless",
-    onerror: (error) => logger.error(`Streamable HTTP transport error: ${error.message}`),
-  });
+  const handler = createMcpHandler(
+    () => createRedashMcpServer({
+      networkTransport: "tcp",
+      networkProtocolName: "http",
+      recordSession: false,
+    }),
+    {
+      legacy: "stateless",
+      onerror: (error) => logger.error(
+        `Streamable HTTP transport error: ${error.message}`,
+        undefined,
+        error,
+      ),
+    },
+  );
 
   if (config.allowedOrigins.length > 0) {
     app.use(config.path, cors({
@@ -64,25 +89,74 @@ export async function startHttpServer(config: HttpServerConfig): Promise<HttpSer
     app.get(HEALTH_CHECK_PATH, (context) => context.text("ok"));
   }
 
+  if (config.path === "/metrics" && hasEmbeddedPrometheusMetrics()) {
+    disableEmbeddedPrometheusMetrics(
+      'MCP_HTTP_PATH is "/metrics"; disabling embedded Prometheus export so the MCP endpoint remains available.',
+    );
+  }
+
+  const honoListener = getRequestListener(app.fetch, { hostname: config.host });
+
   return new Promise((resolve, reject) => {
-    const httpServer = serve({
-      fetch: app.fetch,
-      hostname: config.host,
-      port: config.port,
-    }) as HttpServer;
+    const httpServer = createServer((request, response) => {
+      if (requestPath(request.url) === "/metrics" && hasEmbeddedPrometheusMetrics()) {
+        servePrometheusMetrics(request, response, config.allowedHosts);
+        return;
+      }
+
+      void honoListener(request, response).catch((error: unknown) => {
+        logger.error(`HTTP request listener error: ${formatError(error)}`, undefined, error);
+      });
+    });
 
     httpServer.once("error", reject);
     httpServer.once("listening", () => {
       httpServer.off("error", reject);
       httpServer.on("error", (error) => {
-        logger.error(`HTTP server error: ${formatError(error)}`);
+        logger.error(`HTTP server error: ${formatError(error)}`, undefined, error);
       });
       const address = httpServer.address() as AddressInfo | null;
       const port = address?.port ?? config.port;
       logger.info(`Redash MCP Streamable HTTP server listening on http://${formatHost(config.host)}:${port}${config.path}`);
       resolve(createHttpServerHandle(httpServer, handler.close));
     });
+    httpServer.listen(config.port, config.host);
   });
+}
+
+function servePrometheusMetrics(
+  request: IncomingMessage,
+  response: ServerResponse,
+  allowedHosts: string[],
+): void {
+  const hostValidation = validateHostHeader(request.headers.host, allowedHosts);
+  if (!hostValidation.ok) {
+    response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Forbidden\n");
+    return;
+  }
+
+  if (request.method !== "GET") {
+    response.writeHead(405, {
+      Allow: "GET",
+      "Content-Type": "text/plain; charset=utf-8",
+    });
+    response.end("Method not allowed\n");
+    return;
+  }
+
+  if (!handlePrometheusMetricsRequest(request, response)) {
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Not found\n");
+  }
+}
+
+function requestPath(url: string | undefined): string {
+  try {
+    return new URL(url ?? "/", "http://localhost").pathname;
+  } catch {
+    return "/";
+  }
 }
 
 function createHttpServerHandle(
@@ -100,7 +174,11 @@ function createHttpServerHandle(
   httpServer.once("close", () => {
     if (!closePromise) {
       void close().catch((error: unknown) => {
-        logger.error(`Failed to close the HTTP MCP server cleanly: ${formatError(error)}`);
+        logger.error(
+          `Failed to close the HTTP MCP server cleanly: ${formatError(error)}`,
+          undefined,
+          error,
+        );
       });
     }
   });

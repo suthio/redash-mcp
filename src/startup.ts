@@ -1,8 +1,6 @@
 import { parseServerConfig, type ServerConfig } from "./config.js";
-import { startHttpServer } from "./httpServer.js";
-import { startStdioServer } from "./index.js";
 import { logger } from "./logger.js";
-import { getRedashClient } from "./redashClient.js";
+import { initializeTelemetry, shutdownTelemetry } from "./telemetry.js";
 import { formatError } from "./utils.js";
 
 export interface ServerHandle {
@@ -25,13 +23,17 @@ export interface GracefulShutdownController {
 
 async function startConfiguredServer(config: ServerConfig): Promise<ServerHandle> {
   // Instantiate the client up front so missing credentials fail at startup,
-  // not on the first tool call.
+  // not on the first tool call. Import it after telemetry initialization so
+  // OpenTelemetry can patch node:http before Axios loads.
+  const { getRedashClient } = await import("./redashClient.js");
   getRedashClient();
 
   if (config.transport === "stdio") {
+    const { startStdioServer } = await import("./index.js");
     return await startStdioServer();
   }
 
+  const { startHttpServer } = await import("./httpServer.js");
   return await startHttpServer(config.http);
 }
 
@@ -54,14 +56,13 @@ export function registerGracefulShutdown(
 
       try {
         await handle.close();
-        // The MCP channel is gone; keep the remaining messages on stderr only.
-        logger.setServer(null);
         target.exitCode ??= 0;
         logger.info("Redash MCP server shut down cleanly.");
       } catch (error) {
-        logger.setServer(null);
         target.exitCode = 1;
-        logger.error(`Failed to shut down cleanly: ${formatError(error)}`);
+        logger.error(`Failed to shut down cleanly: ${formatError(error)}`, undefined, error);
+      } finally {
+        await shutdownTelemetry();
       }
     })();
 
@@ -77,11 +78,17 @@ export function registerGracefulShutdown(
 
 export async function runConfiguredServerCli(): Promise<void> {
   try {
-    const handle = await startConfiguredServer(parseServerConfig());
+    const config = parseServerConfig();
+    await initializeTelemetry({
+      transport: config.transport,
+      ...(config.transport === "http" ? { httpPath: config.http.path } : {}),
+    });
+    const handle = await startConfiguredServer(config);
 
     registerGracefulShutdown(handle);
   } catch (error) {
-    console.error(`Error: ${formatError(error)}`);
-    process.exit(1);
+    logger.error(`Error: ${formatError(error)}`, undefined, error);
+    process.exitCode = 1;
+    await shutdownTelemetry();
   }
 }

@@ -17,6 +17,8 @@ import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
 import { logger } from "./logger.js";
 import { scheduleSchema } from './schedule.js';
+import { TelemetryMcpServer, type McpTelemetryOptions } from "./mcpTelemetry.js";
+import { PACKAGE_VERSION } from "./packageInfo.js";
 
 // Load environment variables
 dotenv.config({ quiet: true });
@@ -118,8 +120,6 @@ const createQuerySchema = z.object({
 
 async function createQuery(params: z.infer<typeof createQuerySchema>) {
   try {
-    logger.debug(`Create query params: ${JSON.stringify(params)}`);
-
     // Convert params to CreateQueryRequest with proper defaults
     const queryData: CreateQueryRequest = {
       name: params.name,
@@ -131,9 +131,7 @@ async function createQuery(params: z.infer<typeof createQuerySchema>) {
       tags: params.tags || []
     };
 
-    logger.debug(`Calling redashClient.createQuery with data: ${JSON.stringify(queryData)}`);
     const result = await getRedashClient().createQuery(queryData);
-    logger.debug(`Create query result: ${JSON.stringify(result)}`);
 
     return {
       content: [
@@ -175,8 +173,6 @@ async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
   try {
     const { queryId, ...updateData } = params;
 
-    logger.debug(`Update query ${queryId} params: ${JSON.stringify(updateData)}`);
-
     // Convert params to UpdateQueryRequest - only include non-undefined fields
     const queryData: UpdateQueryRequest = {};
 
@@ -191,9 +187,7 @@ async function updateQuery(params: z.infer<typeof updateQuerySchema>) {
     if (updateData.is_archived !== undefined) queryData.is_archived = updateData.is_archived;
     if (updateData.is_draft !== undefined) queryData.is_draft = updateData.is_draft;
 
-    logger.debug(`Calling redashClient.updateQuery with data: ${JSON.stringify(queryData)}`);
     const result = await getRedashClient().updateQuery(queryId, queryData);
-    logger.debug(`Update query result: ${JSON.stringify(result)}`);
 
     return {
       content: [
@@ -420,7 +414,7 @@ async function executeQuery(params: z.infer<typeof executeQuerySchema>) {
       ]
     };
   } catch (error) {
-    console.error(`Error executing query ${params.queryId}:`, error);
+    logger.error(`Error executing query ${params.queryId}`, { "redash.query.id": params.queryId }, error);
     return {
       isError: true,
       content: [
@@ -544,7 +538,7 @@ async function listDashboards(params: z.infer<typeof listDashboardsSchema>) {
       ]
     };
   } catch (error) {
-    console.error('Error listing dashboards:', error);
+    logger.error("Error listing dashboards", undefined, error);
     return {
       isError: true,
       content: [
@@ -576,7 +570,7 @@ async function getDashboard(params: z.infer<typeof getDashboardSchema>) {
       ]
     };
   } catch (error) {
-    console.error(`Error getting dashboard ${params.dashboardId}:`, error);
+    logger.error(`Error getting dashboard ${params.dashboardId}`, { "redash.dashboard.id": params.dashboardId }, error);
     return {
       isError: true,
       content: [
@@ -676,7 +670,7 @@ async function getVisualization(params: z.infer<typeof getVisualizationSchema>) 
       ]
     };
   } catch (error) {
-    console.error(`Error getting visualization ${params.visualizationId}:`, error);
+    logger.error(`Error getting visualization ${params.visualizationId}`, { "redash.visualization.id": params.visualizationId }, error);
     return {
       isError: true,
       content: [
@@ -753,7 +747,7 @@ async function createVisualization(params: z.infer<typeof createVisualizationSch
       ]
     };
   } catch (error) {
-    console.error('Error creating visualization:', error);
+    logger.error("Error creating visualization", undefined, error);
     return {
       isError: true,
       content: [
@@ -789,7 +783,7 @@ async function updateVisualization(params: z.infer<typeof updateVisualizationSch
       ]
     };
   } catch (error) {
-    console.error(`Error updating visualization ${params.visualizationId}:`, error);
+    logger.error(`Error updating visualization ${params.visualizationId}`, { "redash.visualization.id": params.visualizationId }, error);
     return {
       isError: true,
       content: [
@@ -855,7 +849,7 @@ async function deleteVisualization(params: z.infer<typeof deleteVisualizationSch
       ]
     };
   } catch (error) {
-    console.error(`Error deleting visualization ${params.visualizationId}:`, error);
+    logger.error(`Error deleting visualization ${params.visualizationId}`, { "redash.visualization.id": params.visualizationId }, error);
     return {
       isError: true,
       content: [
@@ -2258,11 +2252,17 @@ const redashResourceTemplate = new ResourceTemplate("redash://{type}/{id}", {
   list: listRedashResources,
 });
 
-export function createRedashMcpServer(): McpServer {
-  const server = new McpServer({
-    name: "redash-mcp",
-    version: "1.1.0",
-  });
+export function createRedashMcpServer(
+  telemetryOptions: McpTelemetryOptions = { networkTransport: "pipe" },
+): McpServer {
+  const server = new TelemetryMcpServer(
+    {
+      name: "redash-mcp",
+      version: PACKAGE_VERSION,
+    },
+    undefined,
+    telemetryOptions,
+  );
 
   for (const tool of toolDefinitions) {
     server.registerTool(
@@ -2272,7 +2272,7 @@ export function createRedashMcpServer(): McpServer {
         inputSchema: tool.inputSchema,
       },
       async (args: Record<string, unknown>) => {
-        logger.debug(`Tool request received: ${tool.name} with args: ${JSON.stringify(args)}`);
+        logger.debug("MCP tool request received", { "gen_ai.tool.name": tool.name });
         return await tool.handler(args) as CallToolResult;
       },
     );
@@ -2295,7 +2295,7 @@ export async function startStdioServer(options: ServeStdioOptions = {}): Promise
   logger.info("Starting Redash MCP server...");
   const handle = serveStdio(
     () => {
-      const server = createRedashMcpServer();
+      const server = createRedashMcpServer({ networkTransport: "pipe", recordSession: true });
       logger.setServer(server);
       return server;
     },
@@ -2308,5 +2308,17 @@ export async function startStdioServer(options: ServeStdioOptions = {}): Promise
     },
   );
   logger.info("Redash MCP stdio server ready!");
-  return handle;
+  let closePromise: Promise<void> | undefined;
+  return {
+    close(): Promise<void> {
+      closePromise ??= (async () => {
+        try {
+          await handle.close();
+        } finally {
+          logger.setServer(null);
+        }
+      })();
+      return closePromise;
+    },
+  };
 }

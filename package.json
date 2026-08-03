@@ -16,6 +16,19 @@
     "redash-mcp": "dist/cli.js"
   },
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "import": "./dist/telemetry.js"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist"
   ],
@@ -25,6 +38,7 @@
     "start": "node dist/cli.js",
     "dev": "ts-node src/cli.ts",
     "test": "jest --passWithNoTests",
+    "test:otel": "pnpm run build && node --test test/otel-export.test.mjs",
     "inspector": "pnpm dlx @modelcontextprotocol/inspector node dist/cli.js",
     "inspector:headless": "BROWSER=none pnpm dlx @modelcontextprotocol/inspector node dist/cli.js",
     "e2e:test": "playwright test",
@@ -44,6 +58,28 @@
     "@hono/node-server": "^2.0.12",
     "@modelcontextprotocol/hono": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api-logs": "^0.221.0",
+    "@opentelemetry/exporter-logs-otlp-grpc": "^0.221.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "^0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-grpc": "^0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.221.0",
+    "@opentelemetry/exporter-prometheus": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.221.0",
+    "@opentelemetry/host-metrics": "^0.38.3",
+    "@opentelemetry/instrumentation": "^0.221.0",
+    "@opentelemetry/instrumentation-http": "^0.221.0",
+    "@opentelemetry/instrumentation-runtime-node": "^0.34.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-logs": "^0.221.0",
+    "@opentelemetry/sdk-metrics": "^2.10.0",
+    "@opentelemetry/sdk-node": "^0.221.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "axios": "^1.19.0",
     "dotenv": "^17.4.2",
     "hono": "^4.12.33",
