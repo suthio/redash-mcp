@@ -18,6 +18,7 @@ import { buildParameterizedExecutionParameters, ParameterizedExecutionError } fr
 import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
 import { logger, LogLevel } from "./logger.js";
+import { scheduleSchema } from './schedule.js';
 
 // Load environment variables
 dotenv.config({ quiet: true });
@@ -100,7 +101,7 @@ const createQuerySchema = z.object({
   query: z.string(),
   description: z.string().optional(),
   options: z.record(z.any()).optional(),
-  schedule: z.record(z.any()).optional(),
+  schedule: scheduleSchema,
   tags: z.array(z.string()).optional()
 });
 
@@ -153,7 +154,7 @@ const updateQuerySchema = z.object({
   query: z.string().optional(),
   description: z.string().optional(),
   options: z.record(z.any()).optional(),
-  schedule: z.record(z.any()).optional(),
+  schedule: scheduleSchema,
   tags: z.array(z.string()).optional(),
   is_archived: z.boolean().optional(),
   is_draft: z.boolean().optional()
