@@ -21,8 +21,8 @@ Model Context Protocol (MCP) server for integrating Redash with AI assistants li
 
 ## Prerequisites
 
-- Node.js (v22 or later)
-- pnpm
+- Node.js (v22.13 or later)
+- Corepack (included with Node.js 22; it selects the pnpm version pinned in `package.json`)
 - Access to a Redash instance
 - Redash API key
 
@@ -70,8 +70,9 @@ Notes:
    cd redash-mcp
    ```
 
-2. Install dependencies:
+2. Enable Corepack and install dependencies:
    ```bash
+   corepack enable
    pnpm install
    ```
 

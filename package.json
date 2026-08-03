@@ -11,7 +11,7 @@
     "url": "https://github.com/suthio/redash-mcp/issues"
   },
   "type": "module",
-  "packageManager": "pnpm@10.34.5",
+  "packageManager": "pnpm@11.18.0",
   "bin": {
     "redash-mcp": "dist/cli.js"
   },
@@ -98,6 +98,6 @@
     "typescript": "^5.2.2"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   }
 }
