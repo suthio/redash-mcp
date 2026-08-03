@@ -18,6 +18,7 @@ import { buildParameterizedExecutionParameters, ParameterizedExecutionError } fr
 import { mergeDeep } from "./utils.js";
 import { buildWidgetLayoutOptions, dashboardGridDefaults, summarizeWidgetLayout, widgetLayoutEntrySchema, widgetPositionSchema } from "./widgetLayout.js";
 import { logger, LogLevel } from "./logger.js";
+import { scheduleSchema } from './schedule.js';
 
 // Load environment variables
 dotenv.config();
@@ -92,8 +93,6 @@ async function getQuery(params: z.infer<typeof getQuerySchema>) {
     };
   }
 }
-
-import { scheduleSchema } from './schedule.js';
 
 // Tool: create_query
 const createQuerySchema = z.object({
