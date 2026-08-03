@@ -30,7 +30,7 @@ export default defineConfig({
   ],
 
   webServer: process.env.SKIP_WEBSERVER ? undefined : {
-    command: `REDASH_URL=${TEST_REDASH_URL} REDASH_API_KEY=${TEST_REDASH_API_KEY} DANGEROUSLY_OMIT_AUTH=true npm run inspector`,
+    command: `REDASH_URL=${TEST_REDASH_URL} REDASH_API_KEY=${TEST_REDASH_API_KEY} DANGEROUSLY_OMIT_AUTH=true pnpm run inspector`,
     url: 'http://localhost:6274',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,

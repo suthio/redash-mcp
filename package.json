@@ -11,6 +11,7 @@
     "url": "https://github.com/suthio/redash-mcp/issues"
   },
   "type": "module",
+  "packageManager": "pnpm@10.34.5",
   "bin": {
     "redash-mcp": "dist/cli.js"
   },
@@ -19,16 +20,16 @@
     "dist"
   ],
   "scripts": {
-    "build": "npx tsc && chmod +x dist/index.js dist/cli.js",
+    "build": "tsc && chmod +x dist/index.js dist/cli.js",
     "start": "node dist/cli.js",
     "dev": "ts-node src/index.ts",
     "test": "jest --passWithNoTests",
-    "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "inspector:headless": "BROWSER=none npx @modelcontextprotocol/inspector node dist/index.js",
+    "inspector": "pnpm dlx @modelcontextprotocol/inspector node dist/index.js",
+    "inspector:headless": "BROWSER=none pnpm dlx @modelcontextprotocol/inspector node dist/index.js",
     "e2e:test": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm run build"
   },
   "keywords": [
     "redash",
@@ -46,6 +47,7 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@jest/globals": "^29.7.0",
     "@playwright/test": "^1.57.0",
     "@types/jest": "^29.5.8",
     "@types/node": "^20.9.0",

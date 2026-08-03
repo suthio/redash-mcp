@@ -21,8 +21,8 @@ Model Context Protocol (MCP) server for integrating Redash with AI assistants li
 
 ## Prerequisites
 
-- Node.js (v18 or later)
-- npm or yarn
+- Node.js (v20 or later)
+- pnpm
 - Access to a Redash instance
 - Redash API key
 
@@ -65,7 +65,7 @@ Notes:
 
 2. Install dependencies:
    ```bash
-   npm install
+   pnpm install
    ```
 
 3. Create a `.env` file with your Redash configuration:
@@ -78,12 +78,12 @@ Notes:
 
 4. Build the project:
    ```bash
-   npm run build
+   pnpm run build
    ```
 
 5. Start the server:
    ```bash
-   npm start
+   pnpm start
    ```
 
 ## Usage with Claude for Desktop
@@ -153,7 +153,7 @@ Add the following configuration (edit paths as needed):
 
 Run in development mode:
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 ## Testing
@@ -161,13 +161,13 @@ npm run dev
 ### Unit Tests
 
 ```bash
-npm test
+pnpm test
 ```
 
 ### E2E Tests
 
 ```bash
-npm run e2e:test
+pnpm run e2e:test
 ```
 
 E2E tests use these default values (can be overridden with environment variables):
@@ -176,13 +176,13 @@ E2E tests use these default values (can be overridden with environment variables
 
 Override example:
 ```bash
-REDASH_URL=https://your-instance.com REDASH_API_KEY=your_key npm run e2e:test
+REDASH_URL=https://your-instance.com REDASH_API_KEY=your_key pnpm run e2e:test
 ```
 
 ### Manual Testing
 
 ```bash
-npm run inspector
+pnpm run inspector
 ```
 
 ## Version History
