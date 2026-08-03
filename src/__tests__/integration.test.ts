@@ -54,6 +54,11 @@ describe('MCP Server Integration', () => {
         const mockInstance = {
           get: jest.fn<any>().mockRejectedValue(new Error('Network error')),
           defaults: { headers: {} },
+          // RedashClient registers a request interceptor for per-request auth
+          // (see requestAuth.ts); this stub must exist or the RedashClient
+          // constructor throws before the interceptor's own error-logging
+          // logic (asserted below) ever runs.
+          interceptors: { request: { use: jest.fn() } },
         };
         mockedAxios.create.mockReturnValue(mockInstance as any);
       }
