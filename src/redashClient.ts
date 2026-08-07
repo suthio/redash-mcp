@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { logger, type LogFields } from './logger.js';
 import { isToolContentCaptureEnabled } from './telemetry.js';
+import { formatError } from './utils.js';
 
 dotenv.config({ quiet: true });
 
@@ -152,6 +153,16 @@ function redashRequestErrorFields(
       "redash.response.body": response?.data,
     },
   );
+}
+
+function redashRequestError(prefix: string, error: AxiosError): Error {
+  if (error.response) {
+    return new Error(`${prefix}: Redash API error (${error.response.status})`);
+  }
+  if (error.request) {
+    return new Error(`${prefix}: No response received from Redash API: ${error.message}`);
+  }
+  return new Error(`${prefix}: ${error.message}`);
 }
 
 export interface RedashSchema {
@@ -562,20 +573,11 @@ export class RedashClient {
           axiosError,
         );
 
-        // Extract detailed error information
-        if (axiosError.response) {
-          const statusCode = axiosError.response.status;
-          throw new Error(`Failed to execute query ${queryId}: Redash API error (${statusCode})`);
-        } else if (axiosError.request) {
-          throw new Error(`Failed to execute query ${queryId}: No response received from Redash API: ${axiosError.message}`);
-        } else {
-          throw new Error(`Failed to execute query ${queryId}: ${axiosError.message}`);
-        }
+        throw redashRequestError(`Failed to execute query ${queryId}`, axiosError);
       } else {
         // Handle non-axios errors
-        const errorMessage = error instanceof Error ? error.message : String(error);
         logger.error("Error executing Redash query", requestFields, error);
-        throw new Error(`Failed to execute query ${queryId}: ${errorMessage}`);
+        throw new Error(`Failed to execute query ${queryId}: ${formatError(error)}`);
       }
     }
   }
@@ -629,20 +631,11 @@ export class RedashClient {
             axiosError,
           );
 
-          // Extract detailed error information
-          if (axiosError.response) {
-            const statusCode = axiosError.response.status;
-            throw new Error(`Failed to poll for query results (job ${jobId}): Redash API error (${statusCode})`);
-          } else if (axiosError.request) {
-            throw new Error(`Failed to poll for query results (job ${jobId}): No response received from Redash API: ${axiosError.message}`);
-          } else {
-            throw new Error(`Failed to poll for query results (job ${jobId}): ${axiosError.message}`);
-          }
+          throw redashRequestError(`Failed to poll for query results (job ${jobId})`, axiosError);
         } else {
           // Handle non-axios errors
-          const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error("Error polling for Redash query results", requestFields, error);
-          throw new Error(`Failed to poll for query results (job ${jobId}): ${errorMessage}`);
+          throw new Error(`Failed to poll for query results (job ${jobId}): ${formatError(error)}`);
         }
       }
     }
@@ -809,18 +802,10 @@ export class RedashClient {
           axiosError,
         );
 
-        if (axiosError.response) {
-          const statusCode = axiosError.response.status;
-          throw new Error(`Failed to fetch CSV results for query ${queryId}: Redash API error (${statusCode})`);
-        } else if (axiosError.request) {
-          throw new Error(`Failed to fetch CSV results for query ${queryId}: No response received from Redash API: ${axiosError.message}`);
-        } else {
-          throw new Error(`Failed to fetch CSV results for query ${queryId}: ${axiosError.message}`);
-        }
+        throw redashRequestError(`Failed to fetch CSV results for query ${queryId}`, axiosError);
       } else {
-        const errorMessage = error instanceof Error ? error.message : String(error);
         logger.error("Error fetching Redash CSV results", requestFields, error);
-        throw new Error(`Failed to fetch CSV results for query ${queryId}: ${errorMessage}`);
+        throw new Error(`Failed to fetch CSV results for query ${queryId}: ${formatError(error)}`);
       }
     }
   }
