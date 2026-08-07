@@ -428,6 +428,90 @@ describe("HTTP MCP server", () => {
       await noAuthClient.close();
     }
   });
+
+  it("rejects requests carrying an interleaved/concurrent set of Authorization headers with each request retaining its own token", async () => {
+    const serverInfo = await startTestServer();
+    const url = new URL(`${serverInfo.baseUrl}/mcp`);
+
+    // Two users, each with their own personal Redash token, calling the same
+    // shared HTTP MCP process at the same time. The security property this
+    // exercises - AsyncLocalStorage context isolation - only shows up under
+    // genuine concurrency: if the two requests' async call chains were
+    // accidentally sharing state, interleaving their execution (rather than
+    // awaiting one fully before starting the other) is what would surface
+    // it, e.g. as user B's token leaking into user A's outgoing Redash call.
+    const userATransport = new StreamableHTTPClientTransport(url, {
+      requestInit: { headers: { Authorization: "Bearer user-a-token" } },
+    });
+    const userAClient = new Client({ name: "user-a-client", version: "1.0.0" });
+
+    const userBTransport = new StreamableHTTPClientTransport(url, {
+      requestInit: { headers: { Authorization: "Bearer user-b-token" } },
+    });
+    const userBClient = new Client({ name: "user-b-client", version: "1.0.0" });
+
+    try {
+      await Promise.all([
+        userAClient.connect(userATransport),
+        userBClient.connect(userBTransport),
+      ]);
+
+      // Fire both tool calls concurrently (no `await` between them) so their
+      // handling genuinely overlaps in time, then let them interleave freely
+      // before asserting on the outcome.
+      const [resultA, resultB] = await Promise.all([
+        userAClient.callTool({ name: "list_queries", arguments: {} }),
+        userBClient.callTool({ name: "list_queries", arguments: {} }),
+      ]);
+
+      expect(resultA.isError).not.toBe(true);
+      expect(resultB.isError).not.toBe(true);
+
+      // Regardless of interleaving/scheduling order, each captured outgoing
+      // Redash call must carry exactly one of the two users' own tokens -
+      // never a mix, never the other user's token, never the static
+      // fallback key.
+      expect(capturedRedashAuthHeaders).toHaveLength(2);
+      expect(capturedRedashAuthHeaders).toEqual(
+        expect.arrayContaining(["Key user-a-token", "Key user-b-token"]),
+      );
+    } finally {
+      await userAClient.close();
+      await userBClient.close();
+    }
+  });
+
+  describe("rejects a supplied-but-unsupported Authorization header without falling back to REDASH_API_KEY", () => {
+    it.each([
+      ["Basic", "Basic dXNlcjpwYXNz"],
+      ["an empty Bearer", "Bearer"],
+      ["Digest", 'Digest username="foo"'],
+    ])("rejects %s and never forwards the static fallback key", async (_label, headerValue) => {
+      const serverInfo = await startTestServer();
+
+      const response = await fetch(`${serverInfo.baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          Authorization: headerValue,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { name: "list_queries", arguments: {} },
+          id: 1,
+        }),
+      });
+
+      expect(response.status).toBe(401);
+
+      // The request must have been rejected before ever reaching the MCP
+      // handler, so no outgoing Redash call - and in particular none using
+      // the static REDASH_API_KEY fallback - should have happened.
+      expect(capturedRedashAuthHeaders).toHaveLength(0);
+    });
+  });
 });
 
 async function startTestServer(
