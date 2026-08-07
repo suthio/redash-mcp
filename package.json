@@ -93,7 +93,7 @@
     "@modelcontextprotocol/client": "^2.0.0",
     "@playwright/test": "^1.57.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.1.2",
     "jest": "^30.4.2",
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.1",
