@@ -128,7 +128,6 @@ The server can also run as a stateless Streamable HTTP MCP server. The HTTP entr
 
 ```bash
 REDASH_URL=https://your-redash-instance.com \
-REDASH_API_KEY=your_api_key \
 MCP_TRANSPORT=http \
 pnpm start
 ```
@@ -137,9 +136,10 @@ This starts `POST http://127.0.0.1:3000/mcp` by default. CLI flags override envi
 
 ```bash
 REDASH_URL=https://your-redash-instance.com \
-REDASH_API_KEY=your_api_key \
 pnpm start --transport http --host 127.0.0.1 --port 3333 --path /mcp
 ```
+
+Note: `REDASH_API_KEY` is not needed here - in HTTP mode each MCP client request supplies its own Redash token via its `Authorization` header (see below). You can still set `REDASH_API_KEY` as a fallback for requests that don't send one.
 
 For a non-local bind behind an authenticated, TLS-terminating reverse proxy, explicitly configure which request hosts and browser origins may reach the server. The equivalent CLI options are `--allowed-hosts` and `--allowed-origins`.
 
@@ -298,6 +298,27 @@ const server = createRedashMcpServer({
 await server.close();
 await shutdownTelemetry();
 ```
+
+### Per-request authentication (multi-user HTTP deployments)
+
+Redash's REST API is stateless and already carries its own auth on every call, so a single HTTP MCP process can safely be shared by many users - there is no need to run one process per user.
+
+In HTTP transport mode, the server reads the Redash API token from **each incoming MCP request's own `Authorization` header** instead of the process-wide `REDASH_API_KEY` environment variable. This lets every user authenticate with their own personal Redash access token while `REDASH_URL` (and the process itself) stays shared and static:
+
+```bash
+# Client sends its own personal Redash token per request, e.g.:
+# Authorization: Bearer <personal-redash-token>
+# or
+# Authorization: Key <personal-redash-token>
+```
+
+Both `Bearer <token>` and `Key <token>` prefixes are accepted (the raw token is extracted either way); a bare token with no prefix also works. The token is then forwarded to Redash using Redash's own `Key <token>` scheme, regardless of how the client sent it.
+
+If a request has no `Authorization` header, the server falls back to the static `REDASH_API_KEY` environment variable if one is set. If neither is available, the request fails with a clear error instead of silently using someone else's token.
+
+This is why `REDASH_API_KEY` is optional (not required) when `MCP_TRANSPORT=http`. In stdio mode `REDASH_API_KEY` remains required exactly as before - stdio has no per-request headers, so nothing changes for existing stdio users.
+
+A typical deployment behind nginx: one HTTP MCP process per Redash instance (e.g. one per environment, such as staging and production), with nginx handling TLS/path routing, and each user's MCP client configured to send their own personal Redash token as the `Authorization` header.
 
 ## Docker
 
