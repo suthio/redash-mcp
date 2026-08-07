@@ -1,3 +1,5 @@
+import type { Readable } from 'node:stream';
+
 export function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -8,6 +10,14 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 export function cloneValue<T>(value: T): T {
   return structuredClone(value);
+}
+
+// Destroys a stream that will no longer be consumed. The no-op error handler
+// must be attached first: late socket errors (ECONNRESET, premature close)
+// emitted after we stop consuming must not crash the process.
+export function destroyQuietly(stream: Readable): void {
+  stream.on('error', () => {});
+  stream.destroy();
 }
 
 export function mergeDeep<T extends Record<string, unknown>>(base: T, patch: Record<string, unknown>): T {
