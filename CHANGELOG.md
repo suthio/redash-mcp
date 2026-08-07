@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.0.16](https://github.com/suthio/redash-mcp/compare/v0.0.15...v0.0.16) - 2026-08-07
+
+- Reuse Redash request error formatting by @kahirokunn in https://github.com/suthio/redash-mcp/pull/77
+- Correct the ad hoc query tool description by @kahirokunn in https://github.com/suthio/redash-mcp/pull/79
+- chore(deps-dev): bump ts-jest from 29.4.11 to 29.4.12 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/82
+- chore(deps): bump @opentelemetry/host-metrics from 0.38.3 to 0.39.0 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/85
+- chore(deps-dev): bump @playwright/test from 1.60.0 to 1.62.1 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/89
+- chore(deps): bump hono from 4.12.33 to 4.12.34 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/92
+- chore(deps-dev): bump jest and @types/jest by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/87
+- chore(deps-dev): bump @jest/globals from 29.7.0 to 30.4.1 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/91
+- chore(deps): bump actions/setup-node from 6 to 7 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/83
+- chore(deps): bump actions/checkout from 6 to 7 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/84
+- Require Node 22.13 and pnpm 11 by @kahirokunn in https://github.com/suthio/redash-mcp/pull/78
+- Prevent OOM when reading large BigQuery schemas by @kahirokunn in https://github.com/suthio/redash-mcp/pull/80
+- Remove RedashClient.getSchema by @kahirokunn in https://github.com/suthio/redash-mcp/pull/81
+
 ## [v0.0.15](https://github.com/suthio/redash-mcp/compare/v0.0.14...v0.0.15) - 2026-08-03
 
 - Add npm metadata for source and issues by @wowsofine in https://github.com/suthio/redash-mcp/pull/61
