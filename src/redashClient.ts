@@ -179,16 +179,6 @@ function redashRequestError(prefix: string, error: AxiosError): Error {
   return new Error(`${prefix}: ${error.message}`);
 }
 
-export interface RedashSchema {
-  schema: Array<{
-    name: string;
-    columns: Array<{
-      name: string;
-      type: string;
-    }>;
-  }>;
-}
-
 // Dashboard interfaces
 export interface CreateDashboardRequest {
   name: string;
@@ -831,23 +821,6 @@ export class RedashClient {
         logger.error("Error fetching Redash CSV results", requestFields, error);
         throw new Error(`Failed to fetch CSV results for query ${queryId}: ${formatError(error)}`);
       }
-    }
-  }
-
-  // Get a specific data source schema by data source ID
-  async getSchema(dataSourceId: number): Promise<RedashSchema> {
-    try {
-      const response = await this.client.get(
-        `/api/data_sources/${dataSourceId}/schema`
-      );
-      return response.data;
-    } catch (error) {
-      logger.error(`Error fetching data source ${dataSourceId} schema`, {
-        "redash.data_source.id": dataSourceId,
-      }, error);
-      throw new Error(
-        `Failed to fetch data source ${dataSourceId} schema from Redash`
-      );
     }
   }
 
