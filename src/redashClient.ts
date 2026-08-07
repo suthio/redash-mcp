@@ -846,12 +846,19 @@ export class RedashClient {
       "redash.schema.search": search,
     });
 
-    let dataSourceType: string;
+    let dataSourceType: string | undefined;
     try {
       dataSourceType = await this.getDataSourceType(dataSourceId);
     } catch (error) {
-      logger.error("Redash schema data-source discovery failed", loggedSchemaFields, error);
-      throw new Error(`${prefix}: ${formatError(error)}`);
+      // Listing data sources requires the global list_data_sources permission,
+      // while the schema endpoint only requires access to this data source.
+      // Treat type discovery as an optional optimization so restricted API
+      // keys can still use the streamed schema endpoint.
+      logger.warning(
+        "Could not determine the data-source type; falling back to the Redash schema endpoint",
+        loggedSchemaFields,
+        error,
+      );
     }
 
     if (dataSourceType === 'results') {

@@ -851,6 +851,37 @@ describe('RedashClient', () => {
       await expect(client.getSchemaPage(1)).resolves.toEqual(response);
     });
 
+    it('should stream the schema when listing data sources is forbidden', async () => {
+      (client as unknown as { dataSourceTypes: Map<number, string> })
+        .dataSourceTypes.clear();
+      const forbidden = Object.assign(new Error('Request failed with status code 403'), {
+        response: { status: 403 },
+      });
+      mockAxiosInstance.get
+        .mockRejectedValueOnce(forbidden)
+        .mockResolvedValueOnce({ data: schemaStream() });
+
+      const result = await client.getSchemaPage(1, 1, 25);
+      expectSchemaPage(result);
+
+      expect(result.schema).toEqual(mockSchema.schema);
+      expect(mockAxiosInstance.get).toHaveBeenCalledTimes(2);
+      expect(mockAxiosInstance.get).toHaveBeenNthCalledWith(1, '/api/data_sources');
+      expect(mockAxiosInstance.get).toHaveBeenNthCalledWith(2, '/api/data_sources/1/schema', {
+        responseType: 'stream',
+      });
+      expect(mockAxiosInstance.post).not.toHaveBeenCalled();
+      expect(logger.warning).toHaveBeenCalledWith(
+        'Could not determine the data-source type; falling back to the Redash schema endpoint',
+        expect.objectContaining({
+          'redash.data_source.id': 1,
+          'redash.schema.page': 1,
+          'redash.schema.page_size': 25,
+        }),
+        expect.any(Error),
+      );
+    });
+
     it('should explain that Query Results has no static schema without calling its schema endpoint', async () => {
       (client as unknown as { dataSourceTypes: Map<number, string> })
         .dataSourceTypes.clear();
