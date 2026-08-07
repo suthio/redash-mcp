@@ -34,19 +34,47 @@ export function getRequestRedashApiKey(): string | undefined {
 }
 
 /**
- * Extracts a bearer/API token from the raw value of an HTTP `Authorization`
- * header.
+ * Result of parsing an incoming `Authorization` header.
  *
- * Accepted formats:
+ * Callers MUST distinguish these three cases rather than collapsing them
+ * into a single `undefined`:
+ *
+ *   - `absent`:  no `Authorization` header was supplied at all. It is safe
+ *                to fall back to the static `REDASH_API_KEY` (this is the
+ *                stdio-mode / header-less HTTP-mode behavior).
+ *   - `valid`:   a supported scheme was used and a token was extracted. Use
+ *                `apiKey` for this request; never fall back to the static
+ *                key.
+ *   - `invalid`: an `Authorization` header was supplied, but it used an
+ *                unsupported scheme or was otherwise malformed (e.g.
+ *                `Basic ...`, `Digest ...`, an empty `Bearer`). The request
+ *                MUST be rejected. Falling back to the static
+ *                `REDASH_API_KEY` here would turn a rejected/unsupported
+ *                client credential into unintended access via the shared
+ *                service-account key.
+ */
+export type AuthorizationHeaderResult =
+  | { status: "absent" }
+  | { status: "valid"; apiKey: string }
+  | { status: "invalid"; reason: string };
+
+/**
+ * Parses the raw value of an HTTP `Authorization` header and extracts a
+ * Redash API key from it, while preserving the distinction between "no
+ * header was sent" and "a header was sent but rejected" - see
+ * {@link AuthorizationHeaderResult}.
+ *
+ * Accepted formats (result: `valid`):
  *   - `Bearer <token>`  (common convention used by many MCP/HTTP clients)
  *   - `Key <token>`     (Redash's own scheme, in case a client mirrors it)
  *   - `<token>`         (raw token, no scheme prefix, no internal whitespace)
  *
  * Any other scheme (e.g. `Basic ...`, `Digest ...`) - or any value that
- * contains whitespace but isn't a recognized `Bearer`/`Key` prefix - is
- * rejected (returns `undefined`) rather than being silently treated as a raw
- * token. This keeps the boundary between "Redash API key" and "some other
- * kind of credential" explicit.
+ * contains whitespace but isn't a recognized `Bearer`/`Key` prefix, or a
+ * bare `Bearer`/`Key` with no token - is rejected (result: `invalid`) rather
+ * than being silently treated as a raw token or as "no credential supplied".
+ * This keeps the boundary between "Redash API key" and "some other kind of
+ * credential" explicit.
  *
  * The returned token is the raw Redash personal access token/API key. It is
  * the caller's responsibility to prefix it with `Key ` again before sending
@@ -56,36 +84,39 @@ export function getRequestRedashApiKey(): string | undefined {
  */
 export function extractApiKeyFromAuthorizationHeader(
   headerValue: string | string[] | undefined
-): string | undefined {
+): AuthorizationHeaderResult {
   if (!headerValue) {
-    return undefined;
+    return { status: "absent" };
   }
 
   const raw = Array.isArray(headerValue) ? headerValue[0] : headerValue;
   const trimmed = raw?.trim();
   if (!trimmed) {
-    return undefined;
+    return { status: "absent" };
   }
 
   const schemeMatch = trimmed.match(/^(Bearer|Key)\s+(.+)$/i);
   if (schemeMatch) {
     const token = schemeMatch[2].trim();
-    return token || undefined;
+    if (token) {
+      return { status: "valid", apiKey: token };
+    }
+    return { status: "invalid", reason: "Bearer/Key scheme with a blank token" };
   }
 
   // A bare `Bearer` or `Key` with no token after it is a malformed scheme
   // usage, not a valid raw token - reject it rather than treating the
   // literal word as the API key.
   if (/^(Bearer|Key)$/i.test(trimmed)) {
-    return undefined;
+    return { status: "invalid", reason: "Bearer/Key scheme with no token" };
   }
 
   // No recognized scheme prefix. Only accept this as a raw token if it has
   // no internal whitespace - anything with whitespace (e.g. `Basic <blob>`)
   // is an unsupported/unrecognized scheme and must be rejected outright.
   if (/\s/.test(trimmed)) {
-    return undefined;
+    return { status: "invalid", reason: "Unsupported or unrecognized Authorization scheme" };
   }
 
-  return trimmed;
+  return { status: "valid", apiKey: trimmed };
 }
