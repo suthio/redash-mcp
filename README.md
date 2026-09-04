@@ -417,6 +417,11 @@ pnpm run inspector
 - v1.1.0: Added query management functionality (create, update, archive)
 - v1.0.0: Initial release
 
+## Maintainers
+
+- [@suthio](https://github.com/suthio)
+- [@kahirokunn](https://github.com/kahirokunn)
+
 ## License
 
 MIT
