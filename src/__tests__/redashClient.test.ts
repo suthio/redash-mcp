@@ -1500,20 +1500,26 @@ describe('RedashClient', () => {
   });
 
   describe('getWidget', () => {
-    it('should fetch a specific widget', async () => {
-      const mockWidget = { id: 1, dashboard_id: 1, width: 3 };
-      mockAxiosInstance.get.mockResolvedValue({ data: mockWidget });
+    it('should read the widget from its dashboard', async () => {
+      const mockWidget = { id: 1, dashboard_id: 7, width: 3, options: { position: { col: 6 } } };
+      mockAxiosInstance.get.mockResolvedValue({ data: { id: 7, widgets: [{ id: 2 }, mockWidget] } });
 
-      const result = await client.getWidget(1);
+      const result = await client.getWidget(1, 7);
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/widgets/1');
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/7');
       expect(result).toEqual(mockWidget);
+    });
+
+    it('should fail when the widget is not on the dashboard', async () => {
+      mockAxiosInstance.get.mockResolvedValue({ data: { id: 7, widgets: [{ id: 2 }] } });
+
+      await expect(client.getWidget(1, 7)).rejects.toThrow('Widget 1 does not belong to dashboard 7');
     });
   });
 
   describe('createWidget', () => {
     it('should create a new widget', async () => {
-      const widgetData = { dashboard_id: 1, visualization_id: 1, width: 3 };
+      const widgetData = { dashboard_id: 1, visualization_id: 1, width: 3, options: {} };
       const mockResponse = { data: { id: 1, ...widgetData } };
       mockAxiosInstance.post.mockResolvedValue(mockResponse);
 
@@ -1526,13 +1532,13 @@ describe('RedashClient', () => {
 
   describe('updateWidget', () => {
     it('should update a widget', async () => {
-      const updateData = { width: 6 };
+      const updateData = { text: '## Title', options: { position: { col: 6 } } };
       mockAxiosInstance.post.mockResolvedValue({ data: { id: 1, ...updateData } });
 
       const result = await client.updateWidget(1, updateData);
 
       expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/widgets/1', updateData);
-      expect(result.width).toBe(6);
+      expect(result.text).toBe('## Title');
     });
   });
 
