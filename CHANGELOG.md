@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.17](https://github.com/suthio/redash-mcp/compare/v0.0.16...v0.0.17) - 2026-09-18
+
+- docs: kahirokunnをメンテナーとして明記 by @suthio in https://github.com/suthio/redash-mcp/pull/109
+
 ## [v0.0.16](https://github.com/suthio/redash-mcp/compare/v0.0.15...v0.0.16) - 2026-08-07
 
 - Reuse Redash request error formatting by @kahirokunn in https://github.com/suthio/redash-mcp/pull/77
