@@ -1522,6 +1522,22 @@ describe('RedashClient', () => {
       expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/widgets', widgetData);
       expect(result).toEqual(mockResponse.data);
     });
+
+    it('should send visualization_id as null for text widgets instead of omitting the key', async () => {
+      // Redash's widgets.py does widget_properties.pop("visualization_id") with no default,
+      // so an omitted key raises a server-side KeyError (HTTP 500) instead of the null branch.
+      const widgetData = { dashboard_id: 1, text: 'Some text', width: 3 };
+      const mockResponse = { data: { id: 2, ...widgetData, visualization_id: null } };
+      mockAxiosInstance.post.mockResolvedValue(mockResponse);
+
+      const result = await client.createWidget(widgetData);
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/widgets', {
+        ...widgetData,
+        visualization_id: null,
+      });
+      expect(result).toEqual(mockResponse.data);
+    });
   });
 
   describe('updateWidget', () => {
