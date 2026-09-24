@@ -421,7 +421,3 @@ pnpm run inspector
 
 - [@suthio](https://github.com/suthio)
 - [@kahirokunn](https://github.com/kahirokunn)
-
-## License
-
-MIT
