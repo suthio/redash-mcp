@@ -272,17 +272,17 @@ export interface RedashWidget {
 
 export interface CreateWidgetRequest {
   dashboard_id: number;
-  visualization_id?: number;
+  // Redash pops this key unconditionally, so text widgets must send null
+  visualization_id: number | null;
   text?: string;
   width: number;
-  options?: any;
+  options: any;
 }
 
+// Redash overwrites both fields on every update and ignores everything else
 export interface UpdateWidgetRequest {
-  visualization_id?: number;
-  text?: string;
-  width?: number;
-  options?: any;
+  text: string;
+  options: any;
 }
 
 // Query Snippet interfaces
@@ -1351,11 +1351,15 @@ export class RedashClient {
     }
   }
 
-  // Get a specific widget by ID
-  async getWidget(widgetId: number): Promise<RedashWidget> {
+  // Redash has no GET /api/widgets/:id; widgets are only readable through their dashboard
+  async getWidget(widgetId: number, dashboardId: number): Promise<RedashWidget> {
     try {
-      const response = await this.client.get(`/api/widgets/${widgetId}`);
-      return response.data;
+      const dashboard = await this.getDashboard(dashboardId);
+      const widget = (dashboard.widgets || []).find((candidate) => candidate.id === widgetId);
+      if (!widget) {
+        throw new Error(`Widget ${widgetId} does not belong to dashboard ${dashboardId}`);
+      }
+      return widget;
     } catch (error) {
       logger.error(`Error fetching widget ${widgetId}: ${error}`);
       throw new Error(`Failed to fetch widget ${widgetId}: ${error instanceof Error ? error.message : String(error)}`);
