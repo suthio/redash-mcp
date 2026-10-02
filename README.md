@@ -312,7 +312,24 @@ docker run --rm -p 127.0.0.1:3000:3000 \
 ```
 
 The container runs Streamable HTTP internally on `0.0.0.0:3000`, while the example publishes that port on the host's loopback interface only. Its default Host and Origin allowlists accept localhost access. When placing the container behind an authenticated reverse proxy or a private cluster service, set `MCP_HTTP_ALLOWED_HOSTS` and `MCP_HTTP_ALLOWED_ORIGINS` to the concrete DNS names used by clients.
-Published images are signed with keyless cosign.
+
+### Verifying images
+
+Published images are signed with keyless cosign and carry an SBOM, SLSA provenance, and a GitHub build provenance attestation.
+
+```bash
+# Signature
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/suthio/redash-mcp/\.github/workflows/release\.yml@' \
+  ghcr.io/suthio/redash-mcp:latest
+
+# Build provenance attestation
+gh attestation verify oci://ghcr.io/suthio/redash-mcp:latest --repo suthio/redash-mcp
+
+# SBOM
+docker buildx imagetools inspect ghcr.io/suthio/redash-mcp:latest --format '{{json .SBOM}}'
+```
 
 ## Available Tools
 

@@ -15,6 +15,7 @@ permissions:
   contents: read
   id-token: write
   packages: write
+  attestations: write
 
 jobs:
   publish:
@@ -169,11 +170,57 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.docker-meta.outputs.tags }}
           labels: ${{ steps.docker-meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}@${{ steps.build-and-push.outputs.digest }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          scanners: vuln
+
+      - name: Tag Docker image
+        shell: bash
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build-and-push.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.docker-meta.outputs.tags }}
+        run: |
+          tag_args=()
+          for tag in ${IMAGE_TAGS}; do
+            tag_args+=(--tag "${tag}")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${IMAGE_REF}"
+
       - name: Sign Docker image
         run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build-and-push.outputs.digest }}
+
+      - name: Verify Docker image signature
+        run: |
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "https://github.com/${{ github.workflow_ref }}" \
+            ghcr.io/${{ github.repository }}@${{ steps.build-and-push.outputs.digest }}
+
+      - name: Attest Docker image build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build-and-push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify Docker image attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify \
+            oci://ghcr.io/${{ github.repository }}@${{ steps.build-and-push.outputs.digest }} \
+            --repo ${{ github.repository }}
