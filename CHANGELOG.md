@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.17](https://github.com/suthio/redash-mcp/compare/v0.0.16...v0.0.17) - 2026-10-02
+
+- docs: kahirokunnをメンテナーとして明記 by @suthio in https://github.com/suthio/redash-mcp/pull/109
+- docs: add MIT LICENSE file by @kahirokunn in https://github.com/suthio/redash-mcp/pull/114
+
 ## [v0.0.16](https://github.com/suthio/redash-mcp/compare/v0.0.15...v0.0.16) - 2026-08-07
 
 - Reuse Redash request error formatting by @kahirokunn in https://github.com/suthio/redash-mcp/pull/77
