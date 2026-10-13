@@ -5,9 +5,29 @@ import { Readable } from 'node:stream';
 import { logger } from '../logger.js';
 import { isToolContentCaptureEnabled } from '../telemetry.js';
 import type { RedashSchemaPage, RedashSchemaResponse } from '../schemaStream.js';
+import { runWithRedashApiKey } from '../requestAuth.js';
 
-// Mock axios
-jest.mock('axios');
+// Mock axios. Provide a default stub instance (including `interceptors`) so
+// that the module-level `redashClient` singleton in `../redashClient.js` -
+// which is constructed as a side effect of the very `import` above, before
+// any `beforeEach` runs - doesn't blow up on `this.client.interceptors...`.
+jest.mock('axios', () => {
+  const defaultInstance = {
+    get: jest.fn(),
+    post: jest.fn(),
+    delete: jest.fn(),
+    defaults: { headers: {} },
+    interceptors: { request: { use: jest.fn() } },
+  };
+
+  return {
+    __esModule: true,
+    default: {
+      create: jest.fn(() => defaultInstance),
+      isAxiosError: jest.fn(),
+    },
+  };
+});
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 // Mock logger
@@ -52,6 +72,11 @@ describe('RedashClient', () => {
       defaults: {
         headers: {},
       },
+      interceptors: {
+        request: {
+          use: jest.fn(),
+        },
+      },
     };
 
     mockedAxios.create.mockReturnValue(mockAxiosInstance as any);
@@ -67,15 +92,23 @@ describe('RedashClient', () => {
     it('should throw error if REDASH_URL is not set', () => {
       delete process.env.REDASH_URL;
       expect(() => new RedashClient()).toThrow(
-        'REDASH_URL and REDASH_API_KEY must be provided in .env file'
+        'REDASH_URL must be provided in .env file'
       );
     });
 
-    it('should throw error if REDASH_API_KEY is not set', () => {
+    it('should NOT throw if REDASH_API_KEY is not set (per-request tokens are supported in HTTP mode)', () => {
       delete process.env.REDASH_API_KEY;
-      expect(() => new RedashClient()).toThrow(
-        'REDASH_URL and REDASH_API_KEY must be provided in .env file'
-      );
+      expect(() => new RedashClient()).not.toThrow();
+    });
+
+    it('should not set a default Authorization header if REDASH_API_KEY is not set', () => {
+      delete process.env.REDASH_API_KEY;
+      mockedAxios.create.mockClear();
+
+      new RedashClient();
+
+      const callArgs = mockedAxios.create.mock.calls[0]?.[0];
+      expect((callArgs?.headers as any)?.Authorization).toBeUndefined();
     });
 
     it('should create axios instance with correct config', () => {
@@ -109,6 +142,10 @@ describe('RedashClient', () => {
       expect(mockedAxios.create).toHaveBeenCalledWith(
         expect.objectContaining({ timeout: 5000 })
       );
+    });
+
+    it('should register a request interceptor for per-request auth', () => {
+      expect(mockAxiosInstance.interceptors.request.use).toHaveBeenCalledTimes(1);
     });
 
     it('should parse JSON extra headers', () => {
@@ -152,6 +189,48 @@ describe('RedashClient', () => {
       const callArgs = mockedAxios.create.mock.calls[0]?.[0];
       expect(callArgs?.headers).toBeDefined();
       expect((callArgs?.headers as any)?.Authorization).toBe('Key test-api-key');
+    });
+  });
+
+  describe('per-request auth (HTTP transport)', () => {
+    function getInterceptor(): (config: any) => any {
+      // Use the most recently registered interceptor, in case a test
+      // constructs an additional RedashClient instance against the same
+      // mocked axios instance.
+      const calls = mockAxiosInstance.interceptors.request.use.mock.calls;
+      const call = calls[calls.length - 1];
+      return call[0];
+    }
+
+    it('uses the request-scoped API key over the static REDASH_API_KEY', async () => {
+      const { runWithRedashApiKey } = await import('../requestAuth.js');
+      const interceptor = getInterceptor();
+
+      const config = runWithRedashApiKey('user-token-from-header', () =>
+        interceptor({ headers: {} })
+      );
+
+      expect(config.headers.Authorization).toBe('Key user-token-from-header');
+    });
+
+    it('falls back to the static REDASH_API_KEY when no request-scoped key is bound (stdio mode)', () => {
+      const interceptor = getInterceptor();
+
+      const config = interceptor({ headers: {} });
+
+      expect(config.headers.Authorization).toBe('Key test-api-key');
+    });
+
+    it('throws a clear error if neither a request-scoped key nor REDASH_API_KEY is available', async () => {
+      delete process.env.REDASH_API_KEY;
+      mockedAxios.create.mockClear();
+      client = new RedashClient();
+
+      const interceptor = getInterceptor();
+
+      expect(() => interceptor({ headers: {} })).toThrow(
+        /No Redash API key available for this request/
+      );
     });
   });
 
@@ -1100,6 +1179,174 @@ describe('RedashClient', () => {
         }),
         expect.any(Error),
       );
+    });
+
+    describe('request-scoped schema caches', () => {
+      let requests: Array<{ method: string; path: string; authorization: string }>;
+      let readDetails: (authorization: string) => Promise<Record<string, unknown>>;
+      let readMetadata: (authorization: string) => Promise<unknown>;
+      let beforeDiscovery: (authorization: string) => Promise<void>;
+
+      beforeEach(() => {
+        requests = [];
+        beforeDiscovery = async () => {};
+        readDetails = async () => ({ id: 4, type: 'bigquery', options: { location: 'us' } });
+        readMetadata = async (authorization) => ({
+          query_result: { data: { rows: [{
+            page_position: 1,
+            table_name: `metadata:${authorization}`,
+            columns_json: JSON.stringify([{ name: 'id', type: 'INT64' }]),
+            has_more: false,
+          }] } },
+        });
+
+        const recordRequest = (method: string, path: string): string => {
+          const interceptor = mockAxiosInstance.interceptors.request.use.mock.calls.at(-1)[0];
+          const { headers } = interceptor({ headers: {} });
+          requests.push({ method, path, authorization: headers.Authorization });
+          return headers.Authorization;
+        };
+
+        mockAxiosInstance.get.mockImplementation(async (path: string) => {
+          const authorization = recordRequest('GET', path);
+          if (path === '/api/data_sources') {
+            await beforeDiscovery(authorization);
+            return { data: [{ id: 4, type: 'bigquery' }] };
+          }
+          if (path === '/api/data_sources/4') {
+            return { data: await readDetails(authorization) };
+          }
+          if (path === '/api/data_sources/4/schema') {
+            return { data: Readable.from([Buffer.from(JSON.stringify({
+              schema: [{ name: `stream:${authorization}`, columns: [{ name: 'id', type: 'integer' }] }],
+            }))]) };
+          }
+          throw new Error(`Unexpected path: ${path}`);
+        });
+        mockAxiosInstance.post.mockImplementation(async (path: string) => {
+          const authorization = recordRequest('POST', path);
+          if (path !== '/api/query_results') throw new Error(`Unexpected path: ${path}`);
+          return { data: await readMetadata(authorization) };
+        });
+      });
+
+      it.each(['missing location', 'detail failure', 'metadata failure'])(
+        'does not share a restricted user\'s %s with a later privileged request',
+        async (failure) => {
+          readDetails = async (authorization) => {
+            if (authorization === 'Key restricted-token') {
+              if (failure === 'missing location') return { id: 4, type: 'bigquery' };
+              if (failure === 'detail failure') throw new Error('Forbidden');
+            }
+            return { id: 4, type: 'bigquery', options: { location: 'us' } };
+          };
+          const successfulMetadata = readMetadata;
+          readMetadata = async (authorization) => {
+            if (authorization === 'Key restricted-token' && failure === 'metadata failure') {
+              throw new Error('Forbidden');
+            }
+            return successfulMetadata(authorization);
+          };
+
+          const restricted = await runWithRedashApiKey('restricted-token', () => client.getSchemaPage(4));
+          const privileged = await runWithRedashApiKey('privileged-token', () => client.getSchemaPage(4));
+          expectSchemaPage(restricted);
+          expectSchemaPage(privileged);
+          expect(restricted.schema[0].name).toBe('stream:Key restricted-token');
+          expect(privileged.schema[0].name).toBe('metadata:Key privileged-token');
+          expect(requests).toContainEqual({ method: 'GET', path: '/api/data_sources/4', authorization: 'Key privileged-token' });
+          expect(requests).toContainEqual({ method: 'POST', path: '/api/query_results', authorization: 'Key privileged-token' });
+        },
+      );
+
+      it('reuses discovery metadata within one request', async () => {
+        await runWithRedashApiKey('user-token', async () => {
+          await client.getSchemaPage(4, 1, 1);
+          await client.getSchemaPage(4, 2, 1);
+        });
+
+        expect(requests.filter(request => request.path === '/api/data_sources')).toHaveLength(1);
+        expect(requests.filter(request => request.path === '/api/data_sources/4')).toHaveLength(1);
+        expect(mockAxiosInstance.post).toHaveBeenCalledTimes(2);
+      });
+
+      it.each(['user-token', undefined])('rediscovers metadata in separate requests using %s', async (token) => {
+        await runWithRedashApiKey(token, () => client.getSchemaPage(4));
+        await runWithRedashApiKey(token, () => client.getSchemaPage(4));
+
+        expect(requests.filter(request => request.path === '/api/data_sources')).toHaveLength(2);
+        expect(requests.filter(request => request.path === '/api/data_sources/4')).toHaveLength(2);
+        expect(mockAxiosInstance.post).toHaveBeenCalledTimes(2);
+      });
+
+      it('disables a failed optimization only for the remainder of its request', async () => {
+        readMetadata = async () => { throw new Error('Metadata query failed'); };
+        await runWithRedashApiKey('user-token', async () => {
+          await client.getSchemaPage(4);
+          await client.getSchemaPage(4);
+        });
+
+        expect(mockAxiosInstance.post).toHaveBeenCalledTimes(1);
+        expect(requests.filter(request => request.path === '/api/data_sources/4/schema')).toHaveLength(2);
+      });
+
+      it.each(['HTTP first', 'stdio first'])('keeps HTTP and stdio caches separate: %s', async (order) => {
+        readDetails = async (authorization) => authorization === 'Key restricted-token'
+          ? { id: 4, type: 'bigquery' }
+          : { id: 4, type: 'bigquery', options: { location: 'us' } };
+        const httpCall = () => runWithRedashApiKey('restricted-token', () => client.getSchemaPage(4));
+        const stdioCall = () => client.getSchemaPage(4);
+        const calls = order === 'HTTP first' ? [httpCall, stdioCall] : [stdioCall, httpCall];
+        const first = await calls[0]();
+        const second = await calls[1]();
+        const [http, stdio] = order === 'HTTP first'
+          ? [first, second]
+          : [second, first];
+
+        expectSchemaPage(http);
+        expectSchemaPage(stdio);
+        expect(http.schema[0].name).toBe('stream:Key restricted-token');
+        expect(stdio.schema[0].name).toBe('metadata:Key test-api-key');
+        expect(requests.filter(request => request.path === '/api/data_sources')).toHaveLength(2);
+      });
+
+      it('retains each overlapping request\'s token, result, and discovery state after an await', async () => {
+        let notifyPrivilegedStarted!: () => void;
+        let releasePrivileged!: () => void;
+        const privilegedStarted = new Promise<void>(resolve => { notifyPrivilegedStarted = resolve; });
+        const restrictedFinished = new Promise<void>(resolve => { releasePrivileged = resolve; });
+        beforeDiscovery = async (authorization) => {
+          if (authorization === 'Key privileged-token') {
+            notifyPrivilegedStarted();
+            await restrictedFinished;
+          } else {
+            await privilegedStarted;
+          }
+        };
+        readDetails = async (authorization) => authorization === 'Key restricted-token'
+          ? { id: 4, type: 'bigquery' }
+          : { id: 4, type: 'bigquery', options: { location: 'us' } };
+
+        const [privileged, restricted] = await Promise.all([
+          runWithRedashApiKey('privileged-token', () => client.getSchemaPage(4)),
+          runWithRedashApiKey('restricted-token', async () => {
+            try { return await client.getSchemaPage(4); }
+            finally { releasePrivileged(); }
+          }),
+        ]);
+
+        expectSchemaPage(privileged);
+        expectSchemaPage(restricted);
+        expect(privileged.schema[0].name).toBe('metadata:Key privileged-token');
+        expect(restricted.schema[0].name).toBe('stream:Key restricted-token');
+        expect(requests.filter(request => request.path === '/api/data_sources/4')).toEqual([
+          { method: 'GET', path: '/api/data_sources/4', authorization: 'Key restricted-token' },
+          { method: 'GET', path: '/api/data_sources/4', authorization: 'Key privileged-token' },
+        ]);
+        expect(requests.filter(request => request.method === 'POST')).toEqual([
+          { method: 'POST', path: '/api/query_results', authorization: 'Key privileged-token' },
+        ]);
+      });
     });
 
     it('should log only a search marker unless content capture is enabled', async () => {

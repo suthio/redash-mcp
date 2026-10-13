@@ -11,6 +11,8 @@ if (existsSync(envPath)) {
 }
 
 // Import application modules only after .env has been loaded. The startup
-// module initializes OpenTelemetry before it imports Axios and the MCP server.
+// module initializes OpenTelemetry before it imports Axios and the MCP server,
+// and performs required-environment-variable validation (including the
+// stdio-vs-http REDASH_API_KEY distinction; see startup.ts).
 const { runConfiguredServerCli } = await import('./startup.js');
 await runConfiguredServerCli();

@@ -29,8 +29,34 @@ async function startConfiguredServer(config: ServerConfig): Promise<ServerHandle
   getRedashClient();
 
   if (config.transport === "stdio") {
+    // The stdio transport serves exactly one MCP client per process
+    // (typically a desktop app) and has no per-request Authorization header
+    // to fall back on, so REDASH_API_KEY must be a valid static credential
+    // known at startup. RedashClient itself only requires REDASH_API_KEY
+    // lazily (per outgoing request, see requestAuth.ts) to support HTTP
+    // transport's per-request tokens, so check it explicitly here to keep
+    // stdio's original fail-fast behavior.
+    if (!process.env.REDASH_API_KEY) {
+      throw new Error(
+        "REDASH_API_KEY must be provided in .env file (required for the stdio transport)."
+      );
+    }
+
     const { startStdioServer } = await import("./index.js");
     return await startStdioServer();
+  }
+
+  // In HTTP transport mode, each incoming request is expected to carry its
+  // own personal Redash API token in its `Authorization` header (see
+  // README's "Streamable HTTP Transport" section), so REDASH_API_KEY is
+  // optional here - it only serves as a fallback for requests that don't
+  // send one.
+  if (!process.env.REDASH_API_KEY) {
+    logger.warning(
+      "REDASH_API_KEY is not set. Running in HTTP transport mode without a static " +
+      "fallback key - every incoming MCP request must supply its own Redash API token via " +
+      "the `Authorization` header, or it will be rejected."
+    );
   }
 
   const { startHttpServer } = await import("./httpServer.js");

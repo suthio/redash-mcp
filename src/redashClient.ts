@@ -16,6 +16,11 @@ import {
 } from './schemaStream.js';
 import { isToolContentCaptureEnabled } from './telemetry.js';
 import { destroyQuietly, formatError } from './utils.js';
+import {
+  getRequestRedashApiKey,
+  getRequestRedashAuthContext,
+  type RedashRequestAuthContext,
+} from './requestAuth.js';
 
 dotenv.config({ quiet: true });
 
@@ -315,6 +320,11 @@ export interface RedashDestination {
   options: any;
 }
 
+interface SchemaCaches {
+  dataSourceTypes: Map<number, string>;
+  bigQueryLocations: Map<number, string | null>;
+}
+
 // RedashClient class for API communication
 export class RedashClient {
   private client: AxiosInstance;
@@ -323,9 +333,15 @@ export class RedashClient {
   private timeoutMs: number;
   private dataSourceTypes = new Map<number, string>();
   private bigQueryLocations = new Map<number, string | null>();
+  private requestSchemaCaches = new WeakMap<RedashRequestAuthContext, SchemaCaches>();
 
   constructor() {
     this.baseUrl = process.env.REDASH_URL || '';
+    // Static fallback key, used for stdio mode (one process per user) and as a
+    // fallback in HTTP mode when a request doesn't carry its own Authorization
+    // header. NOT required at construction time: in HTTP mode every user
+    // supplies their own personal Redash API token per-request instead, see
+    // `requestAuth.ts` and the request interceptor set up below.
     this.apiKey = process.env.REDASH_API_KEY || '';
     // Strict digit check: parseInt would misread "30s" as 30 (a 30ms budget),
     // and a NaN here would turn the schema-read deadline into ~1ms. The cap is
@@ -335,14 +351,21 @@ export class RedashClient {
       ? Math.min(Number(rawTimeout), 2147483647)
       : 30000;
 
-    if (!this.baseUrl || !this.apiKey) {
-      throw new Error('REDASH_URL and REDASH_API_KEY must be provided in .env file');
+    if (!this.baseUrl) {
+      throw new Error('REDASH_URL must be provided in .env file');
     }
 
     const defaultHeaders: Record<string, string> = {
-      'Authorization': `Key ${this.apiKey}`,
       'Content-Type': 'application/json'
     };
+
+    // Only set a default Authorization header when a static API key is
+    // configured. If none is configured (pure per-request HTTP mode), the
+    // request interceptor below is responsible for adding it - or for
+    // rejecting the request if no key is available at all.
+    if (this.apiKey) {
+      defaultHeaders['Authorization'] = `Key ${this.apiKey}`;
+    }
 
     const extraHeaders = this.parseExtraHeaders();
 
@@ -369,6 +392,31 @@ export class RedashClient {
     }
 
     this.client = axios.create(axiosConfig);
+
+    // Per-request auth: if the current async context (set up per incoming
+    // MCP HTTP request, see httpServer.ts) carries a Redash API key that was
+    // extracted from that request's own `Authorization` header, use it for
+    // this outgoing call instead of the static `this.apiKey`. In stdio mode
+    // no per-request key is ever bound, so this always falls back to the
+    // header set above (the static REDASH_API_KEY) - no behavior change for
+    // existing stdio users.
+    this.client.interceptors.request.use((config) => {
+      const requestApiKey = getRequestRedashApiKey();
+      const apiKey = requestApiKey || this.apiKey;
+
+      if (!apiKey) {
+        throw new Error(
+          'No Redash API key available for this request. Provide it via the ' +
+          'incoming `Authorization` header (HTTP transport), or set REDASH_API_KEY ' +
+          '(stdio transport / static fallback).'
+        );
+      }
+
+      config.headers = config.headers ?? {};
+      (config.headers as Record<string, unknown>)['Authorization'] = `Key ${apiKey}`;
+
+      return config;
+    });
   }
 
   // Parse extra headers from env var `REDASH_EXTRA_HEADERS`.
@@ -834,6 +882,7 @@ export class RedashClient {
     search?: string,
   ): Promise<RedashSchemaResponse> {
     schemaPageOffset(page, pageSize);
+    const caches = this.getSchemaCaches();
 
     const prefix = `Failed to fetch schema page for data source ${dataSourceId}`;
     const schemaFields: LogFields = {
@@ -848,7 +897,7 @@ export class RedashClient {
 
     let dataSourceType: string | undefined;
     try {
-      dataSourceType = await this.getDataSourceType(dataSourceId);
+      dataSourceType = await this.getDataSourceType(dataSourceId, caches.dataSourceTypes);
     } catch (error) {
       // Listing data sources requires the global list_data_sources permission,
       // while the schema endpoint only requires access to this data source.
@@ -871,7 +920,7 @@ export class RedashClient {
     if (dataSourceType === 'bigquery' || dataSourceType === 'bigquery_gce') {
       let location: string | null = null;
       try {
-        location = await this.getBigQueryLocation(dataSourceId);
+        location = await this.getBigQueryLocation(dataSourceId, caches.bigQueryLocations);
       } catch (error) {
         logger.warning(
           "Could not read the configured BigQuery location; falling back to the Redash schema endpoint",
@@ -884,7 +933,7 @@ export class RedashClient {
         try {
           return await this.getBigQuerySchemaPage(dataSourceId, location, page, pageSize, search);
         } catch (error) {
-          this.bigQueryLocations.set(dataSourceId, null);
+          caches.bigQueryLocations.set(dataSourceId, null);
           logger.warning(
             "BigQuery schema pagination failed; falling back to the Redash schema endpoint",
             loggedSchemaFields,
@@ -941,8 +990,25 @@ export class RedashClient {
     }
   }
 
-  private async getDataSourceType(dataSourceId: number): Promise<string> {
-    const cached = this.dataSourceTypes.get(dataSourceId);
+  private getSchemaCaches(): SchemaCaches {
+    const requestContext = getRequestRedashAuthContext();
+    if (!requestContext) {
+      return { dataSourceTypes: this.dataSourceTypes, bigQueryLocations: this.bigQueryLocations };
+    }
+
+    // Discovery results depend on the caller's permissions. HTTP requests
+    // reuse them only within their own context, including negative results.
+    // Weak keys allow the cache to be collected when that context is released.
+    let caches = this.requestSchemaCaches.get(requestContext);
+    if (!caches) {
+      caches = { dataSourceTypes: new Map(), bigQueryLocations: new Map() };
+      this.requestSchemaCaches.set(requestContext, caches);
+    }
+    return caches;
+  }
+
+  private async getDataSourceType(dataSourceId: number, cache: Map<number, string>): Promise<string> {
+    const cached = cache.get(dataSourceId);
     if (cached !== undefined) {
       return cached;
     }
@@ -950,7 +1016,7 @@ export class RedashClient {
     const dataSources = await this.getDataSources();
     for (const candidate of dataSources) {
       if (typeof candidate?.id === 'number' && typeof candidate?.type === 'string') {
-        this.dataSourceTypes.set(candidate.id, candidate.type);
+        cache.set(candidate.id, candidate.type);
       }
     }
     const dataSource = dataSources.find(candidate => candidate?.id === dataSourceId);
@@ -961,18 +1027,18 @@ export class RedashClient {
     return dataSource.type;
   }
 
-  private async getBigQueryLocation(dataSourceId: number): Promise<string | null> {
-    if (this.bigQueryLocations.has(dataSourceId)) {
-      return this.bigQueryLocations.get(dataSourceId) ?? null;
+  private async getBigQueryLocation(dataSourceId: number, cache: Map<number, string | null>): Promise<string | null> {
+    if (cache.has(dataSourceId)) {
+      return cache.get(dataSourceId) ?? null;
     }
 
     try {
       const response = await this.client.get(`/api/data_sources/${dataSourceId}`);
       const location = readBigQueryDataSourceLocation(response.data);
-      this.bigQueryLocations.set(dataSourceId, location);
+      cache.set(dataSourceId, location);
       return location;
     } catch (error) {
-      this.bigQueryLocations.set(dataSourceId, null);
+      cache.set(dataSourceId, null);
       throw error;
     }
   }

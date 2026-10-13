@@ -16,6 +16,7 @@ import {
 import { cors } from "hono/cors";
 import { createRedashMcpServer } from "./index.js";
 import { logger } from "./logger.js";
+import { extractApiKeyFromAuthorizationHeader, runWithRedashApiKey } from "./requestAuth.js";
 import {
   disableEmbeddedPrometheusMetrics,
   handlePrometheusMetricsRequest,
@@ -76,9 +77,30 @@ export async function startHttpServer(config: HttpServerConfig): Promise<HttpSer
     }));
   }
 
-  app.post(config.path, (context) => handler.fetch(context.req.raw, {
-    parsedBody: context.get("parsedBody"),
-  }));
+  app.post(config.path, (context) => {
+    // Each MCP HTTP request carries its own Redash personal access token in
+    // its `Authorization` header (e.g. `Authorization: Bearer <token>`).
+    // Binding it to this request's async context ensures every RedashClient
+    // call triggered while handling this request - and only this request -
+    // uses this user's token, never a shared/static one. Never log the
+    // extracted token itself.
+    const authResult = extractApiKeyFromAuthorizationHeader(context.req.header("Authorization"));
+
+    // An `Authorization` header that was supplied but rejected (unsupported
+    // scheme, malformed value, ...) must never fall back to the static
+    // REDASH_API_KEY - that would turn a rejected client credential into
+    // unintended access via the shared service-account key. Fail the
+    // request outright instead of forwarding it to the MCP handler.
+    if (authResult.status === "invalid") {
+      return unauthorized(authResult.reason);
+    }
+
+    const requestApiKey = authResult.status === "valid" ? authResult.apiKey : undefined;
+
+    return runWithRedashApiKey(requestApiKey, () => handler.fetch(context.req.raw, {
+      parsedBody: context.get("parsedBody"),
+    }));
+  });
   app.on(["GET", "DELETE"], config.path, methodNotAllowed);
 
   if (config.path === HEALTH_CHECK_PATH) {
@@ -238,6 +260,27 @@ function methodNotAllowed() {
       status: 405,
       headers: {
         Allow: "POST",
+        "Content-Type": "application/json",
+      },
+    },
+  );
+}
+
+// The `reason` is a fixed, non-sensitive description of why the header was
+// rejected (e.g. "unsupported scheme") - never the header value itself.
+function unauthorized(reason: string) {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: {
+        code: -32001,
+        message: `Unauthorized: ${reason}.`,
+      },
+      id: null,
+    }),
+    {
+      status: 401,
+      headers: {
         "Content-Type": "application/json",
       },
     },
