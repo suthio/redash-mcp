@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.1.0](https://github.com/suthio/redash-mcp/compare/v0.0.17...v0.1.0) - 2026-10-13
+
+- Add per-request authentication via Authorization header for HTTP transport by @kingspride in https://github.com/suthio/redash-mcp/pull/65
+
 ## [v0.0.17](https://github.com/suthio/redash-mcp/compare/v0.0.16...v0.0.17) - 2026-10-02
 
 - docs: kahirokunnをメンテナーとして明記 by @suthio in https://github.com/suthio/redash-mcp/pull/109
