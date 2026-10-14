@@ -1644,12 +1644,13 @@ async function listWidgets() {
 
 // Tool: get_widget
 const getWidgetSchema = z.object({
-  widgetId: z.coerce.number().describe("ID of the widget to get")
+  widgetId: z.coerce.number().describe("ID of the widget to get"),
+  dashboardId: z.coerce.number().describe("ID of the dashboard the widget belongs to")
 });
 
 async function getWidget(params: z.infer<typeof getWidgetSchema>) {
   try {
-    const result = await getRedashClient().getWidget(params.widgetId);
+    const result = await getRedashClient().getWidget(params.widgetId, params.dashboardId);
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
     };
@@ -1677,7 +1678,7 @@ async function createWidget(params: z.infer<typeof createWidgetSchema>) {
     const widgetOptions = params.position ? buildWidgetLayoutOptions(params.options || {}, params.position) : (params.options || {});
     const widgetData: CreateWidgetRequest = {
       dashboard_id: params.dashboard_id,
-      visualization_id: params.visualization_id,
+      visualization_id: params.visualization_id ?? null,
       text: params.text,
       width: params.width,
       options: widgetOptions
@@ -1698,30 +1699,21 @@ async function createWidget(params: z.infer<typeof createWidgetSchema>) {
 // Tool: update_widget
 const updateWidgetSchema = z.object({
   widgetId: z.coerce.number().describe("ID of the widget to update"),
-  visualization_id: z.coerce.number().optional().describe("ID of the visualization to display"),
+  dashboardId: z.coerce.number().describe("ID of the dashboard the widget belongs to"),
   text: z.string().optional().describe("Text content for text widgets"),
-  width: z.coerce.number().optional().describe("Width of the widget (1-6)"),
-  options: z.record(z.string(), z.any()).optional().describe("Widget options"),
+  options: z.record(z.string(), z.any()).optional().describe("Widget options; replaces the stored options when given"),
   position: widgetPositionSchema.optional()
 });
 
 async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
   try {
-    const { widgetId, position, ...updateData } = params;
-    const widgetData: UpdateWidgetRequest = {};
-    if (updateData.visualization_id !== undefined) widgetData.visualization_id = updateData.visualization_id;
-    if (updateData.text !== undefined) widgetData.text = updateData.text;
-    if (updateData.width !== undefined) widgetData.width = updateData.width;
-    if (updateData.options !== undefined) widgetData.options = updateData.options;
-
-    if (position) {
-      const currentWidget = await getRedashClient().getWidget(widgetId);
-      const currentOptions = updateData.options !== undefined ? updateData.options : (currentWidget.options ?? {});
-      widgetData.options = buildWidgetLayoutOptions(currentOptions, position);
-      if (updateData.text === undefined) {
-        widgetData.text = currentWidget.text ?? "";
-      }
-    }
+    const { widgetId, dashboardId, position, text, options } = params;
+    const currentWidget = await getRedashClient().getWidget(widgetId, dashboardId);
+    const baseOptions = options ?? currentWidget.options ?? {};
+    const widgetData: UpdateWidgetRequest = {
+      text: text ?? currentWidget.text ?? "",
+      options: position ? buildWidgetLayoutOptions(baseOptions, position) : baseOptions
+    };
 
     const result = await getRedashClient().updateWidget(widgetId, widgetData);
     return {
@@ -1739,12 +1731,13 @@ async function updateWidget(params: z.infer<typeof updateWidgetSchema>) {
 // Tool: update_widget_layout
 const updateWidgetLayoutSchema = z.object({
   widgetId: z.coerce.number().describe("ID of the widget"),
+  dashboardId: z.coerce.number().describe("ID of the dashboard the widget belongs to"),
   position: widgetPositionSchema,
 });
 
 async function updateWidgetLayout(params: z.infer<typeof updateWidgetLayoutSchema>) {
   try {
-    const widget = await getRedashClient().getWidget(params.widgetId);
+    const widget = await getRedashClient().getWidget(params.widgetId, params.dashboardId);
     const result = await getRedashClient().updateWidget(params.widgetId, {
       text: widget.text ?? "",
       options: buildWidgetLayoutOptions(widget.options ?? {}, params.position),
@@ -1827,12 +1820,13 @@ async function updateDashboardLayout(params: z.infer<typeof updateDashboardLayou
 
 // Tool: get_widget_parameter_mappings
 const getWidgetParameterMappingsSchema = z.object({
-  widgetId: z.coerce.number().describe("ID of the widget")
+  widgetId: z.coerce.number().describe("ID of the widget"),
+  dashboardId: z.coerce.number().describe("ID of the dashboard the widget belongs to")
 });
 
 async function getWidgetParameterMappings(params: z.infer<typeof getWidgetParameterMappingsSchema>) {
   try {
-    const widget = await getRedashClient().getWidget(params.widgetId);
+    const widget = await getRedashClient().getWidget(params.widgetId, params.dashboardId);
     const mappings = toNamedEntries(widget.options?.parameterMappings || {}).sort((a, b) => a.name.localeCompare(b.name));
 
     return {
@@ -1870,6 +1864,7 @@ async function getWidgetParameterMappings(params: z.infer<typeof getWidgetParame
 // Tool: update_widget_parameter_mappings
 const updateWidgetParameterMappingsSchema = z.object({
   widgetId: z.coerce.number().describe("ID of the widget"),
+  dashboardId: z.coerce.number().describe("ID of the dashboard the widget belongs to"),
   parameterMappings: z.array(widgetParameterMappingPatchSchema).default([]).describe("Parameter mappings to merge into the widget"),
   removeParameterNames: z.array(z.string()).optional().describe("Widget parameter mapping names to remove"),
   replaceParameterMappings: z.boolean().optional().describe("Replace the stored mappings instead of merging")
@@ -1877,7 +1872,7 @@ const updateWidgetParameterMappingsSchema = z.object({
 
 async function updateWidgetParameterMappings(params: z.infer<typeof updateWidgetParameterMappingsSchema>) {
   try {
-    const widget = await getRedashClient().getWidget(params.widgetId);
+    const widget = await getRedashClient().getWidget(params.widgetId, params.dashboardId);
     const widgetOptions = widget.options || {};
     const existingMappings = toNamedEntries(widgetOptions.parameterMappings || {});
     const updatedMappings = mergeNamedEntries(existingMappings, params.parameterMappings, {
