@@ -210,6 +210,7 @@ export interface RedashAlert {
     value: number | string;
     custom_subject?: string;
     custom_body?: string;
+    selector?: 'first' | 'min' | 'max';
     muted?: boolean;
   };
   state: string;
@@ -228,6 +229,8 @@ export interface CreateAlertRequest {
     value: number | string;
     custom_subject?: string;
     custom_body?: string;
+    selector?: 'first' | 'min' | 'max';
+    muted?: boolean;
   };
   rearm?: number | null;
 }
@@ -241,6 +244,8 @@ export interface UpdateAlertRequest {
     value?: number | string;
     custom_subject?: string;
     custom_body?: string;
+    selector?: 'first' | 'min' | 'max';
+    muted?: boolean;
   };
   rearm?: number | null;
 }
@@ -1241,7 +1246,13 @@ export class RedashClient {
   // Update an existing alert
   async updateAlert(alertId: number, data: UpdateAlertRequest): Promise<RedashAlert> {
     try {
-      const response = await this.client.post(`/api/alerts/${alertId}`, data);
+      // Redash replaces options wholesale, so merge to keep selector/muted/template set earlier
+      let payload = data;
+      if (data.options) {
+        const existing = await this.client.get(`/api/alerts/${alertId}`);
+        payload = { ...data, options: { ...existing.data.options, ...data.options } };
+      }
+      const response = await this.client.post(`/api/alerts/${alertId}`, payload);
       return response.data;
     } catch (error) {
       logger.error(`Error updating alert ${alertId}: ${error}`);

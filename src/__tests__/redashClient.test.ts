@@ -1585,6 +1585,31 @@ describe('RedashClient', () => {
       expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1', updateData);
       expect(result.name).toBe('Updated Alert');
     });
+
+    it('should merge options over the existing ones so selector and muted survive', async () => {
+      mockAxiosInstance.get.mockResolvedValue({
+        data: { id: 1, options: { column: 'c', op: '>', value: 1, selector: 'first', muted: true } }
+      });
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1 } });
+
+      await client.updateAlert(1, { options: { value: 5 } });
+
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/alerts/1');
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1', {
+        options: { column: 'c', op: '>', value: 5, selector: 'first', muted: true }
+      });
+    });
+
+    it('should send selector when set explicitly', async () => {
+      mockAxiosInstance.get.mockResolvedValue({ data: { id: 1, options: { column: 'c', op: '>', value: 1 } } });
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1 } });
+
+      await client.updateAlert(1, { options: { selector: 'max' } });
+
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1', {
+        options: { column: 'c', op: '>', value: 1, selector: 'max' }
+      });
+    });
   });
 
   describe('deleteAlert', () => {

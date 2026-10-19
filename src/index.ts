@@ -1315,7 +1315,9 @@ const createAlertSchema = z.object({
     op: z.string().describe("Comparison operator: greater than, less than, equals, not equals, etc."),
     value: z.union([z.coerce.number(), z.string()]).describe("Threshold value to compare against"),
     custom_subject: z.string().optional().describe("Custom email subject"),
-    custom_body: z.string().optional().describe("Custom email body")
+    custom_body: z.string().optional().describe("Custom email body"),
+    selector: z.enum(["first", "min", "max"]).optional().describe("Row selector; defaults to 'first'. Redash cannot render custom templates without it, so notifications are silently dropped"),
+    muted: z.boolean().optional().describe("Mute notifications for this alert")
   }).describe("Alert options including column to monitor, operator, and threshold value"),
   rearm: z.coerce.number().nullable().optional().describe("Number of seconds to wait before triggering again (null for never)")
 });
@@ -1325,7 +1327,7 @@ async function createAlert(params: z.infer<typeof createAlertSchema>) {
     const alertData: CreateAlertRequest = {
       name: params.name,
       query_id: params.query_id,
-      options: params.options,
+      options: { selector: 'first', ...params.options },
       rearm: params.rearm
     };
     const result = await getRedashClient().createAlert(alertData);
@@ -1351,8 +1353,10 @@ const updateAlertSchema = z.object({
     op: z.string().optional().describe("Comparison operator"),
     value: z.union([z.coerce.number(), z.string()]).optional().describe("Threshold value"),
     custom_subject: z.string().optional().describe("Custom email subject"),
-    custom_body: z.string().optional().describe("Custom email body")
-  }).optional().describe("Alert options"),
+    custom_body: z.string().optional().describe("Custom email body"),
+    selector: z.enum(["first", "min", "max"]).optional().describe("Row selector"),
+    muted: z.boolean().optional().describe("Mute notifications for this alert")
+  }).optional().describe("Alert options; merged over the existing options"),
   rearm: z.coerce.number().nullable().optional().describe("Number of seconds to wait before triggering again")
 });
 
