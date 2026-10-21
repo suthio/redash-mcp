@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.1.1](https://github.com/suthio/redash-mcp/compare/v0.1.0...v0.1.1) - 2026-10-21
+
+- chore(deps): bump zod from 4.4.3 to 4.5.4 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/108
+- chore(deps): bump hono from 4.12.34 to 4.13.5 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/107
+- chore(deps-dev): bump jest from 30.4.2 to 30.5.0 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/106
+- chore(deps): bump stream-json from 3.5.0 to 3.6.0 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/105
+- chore(deps): bump axios from 1.19.0 to 1.20.0 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/102
+- Use patched Node.js versions in Docker and CI by @kahirokunn in https://github.com/suthio/redash-mcp/pull/119
+- chore(deps): bump @hono/node-server from 2.0.12 to 2.1.5 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/98
+
 ## [v0.1.0](https://github.com/suthio/redash-mcp/compare/v0.0.17...v0.1.0) - 2026-10-13
 
 - Add per-request authentication via Authorization header for HTTP transport by @kingspride in https://github.com/suthio/redash-mcp/pull/65
