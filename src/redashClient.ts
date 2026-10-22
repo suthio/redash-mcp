@@ -273,10 +273,10 @@ export interface RedashWidget {
 export interface CreateWidgetRequest {
   dashboard_id: number;
   // Redash pops this key unconditionally, so text widgets must send null
-  visualization_id: number | null;
+  visualization_id?: number | null;
   text?: string;
   width: number;
-  options: any;
+  options?: any;
 }
 
 // Redash overwrites both fields on every update and ignores everything else
