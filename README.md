@@ -166,6 +166,18 @@ Host and Origin allowlists protect against DNS rebinding and unwanted browser or
 
 HTTP mode is stateless: the server does not issue `Mcp-Session-Id`, does not provide a standalone GET SSE stream, and handles each `POST /mcp` with a fresh MCP server instance. Both current MCP clients and 2025-era Streamable HTTP clients use that same URL. `GET /mcp` and `DELETE /mcp` return `405 Method Not Allowed`.
 
+HTTP request bodies are limited to 4 MiB before JSON parsing, including chunked
+requests. Tool arguments are limited to 10,000 object keys and array entries
+across their nested structure, before schema validation. Strings count as one
+value rather than one element per character, so long SQL remains usable within
+the HTTP byte limit. The element limit also applies to stdio tools. A layout
+update containing 1,000 widgets with all five position fields each fits this limit.
+
+When upgrading an existing installation, refresh its dependency lockfile and
+audit it: an application lockfile can retain an old `follow-redirects` even
+though Axios's range permits the patched version. This repository's pnpm
+lockfile does not replace the lockfile of an npm package consumer.
+
 The default bind is localhost-only (`127.0.0.1`) with Host and Origin protection. Browser requests from allowed origins receive CORS response headers; other origins are rejected with `403 Forbidden`.
 
 `GET http://127.0.0.1:3000/healthz` returns `200 OK` with the body `ok` for lightweight health checks. It uses the same Host and Origin allowlists as the MCP endpoint and does not contact Redash. If `MCP_HTTP_PATH=/healthz`, that URL remains the MCP endpoint and the standalone health check is disabled with a startup warning.

@@ -9,6 +9,7 @@ import {
 import { serveStdio, type ServeStdioOptions, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { z, type ZodObject, type ZodRawShape } from "zod";
 import * as dotenv from 'dotenv';
+import { MAX_TOOL_INPUT_ELEMENTS } from './inputLimits.js';
 import { getRedashClient, CreateQueryRequest, UpdateQueryRequest, CreateVisualizationRequest, UpdateVisualizationRequest, CreateDashboardRequest, UpdateDashboardRequest, CreateAlertRequest, UpdateAlertRequest, CreateAlertSubscriptionRequest, CreateWidgetRequest, UpdateWidgetRequest, CreateQuerySnippetRequest, UpdateQuerySnippetRequest } from "./redashClient.js";
 import { buildChartVisualizationOptions, chartVisualizationUpdateSchema } from "./chartVisualization.js";
 import { mergeNamedEntries, queryParameterPatchSchema, resolveParameterOrder, toNamedEntries, toNamedRecord, widgetParameterMappingPatchSchema } from "./parameterManagement.js";
@@ -2266,7 +2267,7 @@ export function createRedashMcpServer(
       name: "redash-mcp",
       version: PACKAGE_VERSION,
     },
-    undefined,
+    { maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS },
     telemetryOptions,
   );
 

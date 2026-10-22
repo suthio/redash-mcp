@@ -13,6 +13,7 @@ import {
   shutdownTelemetry,
 } from "../telemetry.js";
 import { CLIENT_VERSION_MATRIX, MODERN_CLIENT_OPTIONS } from "./clientFixtures.js";
+import { MAX_HTTP_REQUEST_BYTES } from "../inputLimits.js";
 
 type HttpServerConfig = Parameters<typeof startHttpServer>[0];
 
@@ -91,6 +92,42 @@ describe("HTTP MCP server", () => {
   afterEach(async () => {
     await Promise.all(openHandles.splice(0).map((handle) => handle.close()));
     consoleErrorSpy.mockRestore();
+  });
+
+  it.each([MAX_HTTP_REQUEST_BYTES - 1, MAX_HTTP_REQUEST_BYTES, MAX_HTTP_REQUEST_BYTES + 1])(
+    "bounds JSON bodies at %i bytes before the adapter parser",
+    async (bytes) => {
+      const serverInfo = await startTestServer();
+      const json = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+      const response = await fetch(`${serverInfo.baseUrl}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+        body: json + " ".repeat(bytes - Buffer.byteLength(json)),
+      });
+      expect(response.status).toBe(bytes > MAX_HTTP_REQUEST_BYTES ? 413 : 200);
+      await response.text();
+      expect(capturedRedashAuthHeaders).toHaveLength(0);
+    },
+  );
+
+  it("rejects oversized chunked invalid JSON before parsing and still serves a later POST", async () => {
+    const serverInfo = await startTestServer();
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      const outgoing = request(`${serverInfo.baseUrl}/mcp`, {
+        method: "POST", headers: { "Content-Type": "application/json", "Transfer-Encoding": "chunked" },
+      }, response => { response.resume(); response.once("end", () => resolve(response.statusCode)); });
+      outgoing.on("error", reject);
+      outgoing.write("x".repeat(MAX_HTTP_REQUEST_BYTES));
+      outgoing.end("x");
+    });
+    // Invalid JSON would return 400 if the adapter parser ran first.
+    expect(status).toBe(413);
+    const response = await fetch(`${serverInfo.baseUrl}/mcp`, {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }),
+    });
+    expect(response.status).toBe(200);
+    await response.text();
   });
 
   it("returns 405 for GET and DELETE on the MCP endpoint", async () => {
