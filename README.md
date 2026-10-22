@@ -337,6 +337,13 @@ Published images are signed with keyless cosign.
 
 ## Available Tools
 
+When `update_alert` includes `options`, stored options are retained and an absent
+legacy `selector` is repaired to `first`, matching Redash's evaluation default.
+Use `options: {}` to repair the selector without changing other options. An
+explicit stored selector, including an empty, null, or unknown value, is left
+unchanged; supply a supported selector explicitly to change it. Name-only
+updates do not read or repair alert options.
+
 ### Query Management
 - `list_queries`: List all available queries in Redash
 - `get_query`: Get details of a specific query
