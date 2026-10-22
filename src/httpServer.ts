@@ -14,6 +14,9 @@ import {
   validateOriginHeader,
 } from "@modelcontextprotocol/server";
 import { cors } from "hono/cors";
+import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { MAX_HTTP_REQUEST_BYTES } from "./inputLimits.js";
 import { createRedashMcpServer } from "./index.js";
 import { logger } from "./logger.js";
 import { extractApiKeyFromAuthorizationHeader, runWithRedashApiKey } from "./requestAuth.js";
@@ -62,6 +65,7 @@ export async function startHttpServer(config: HttpServerConfig): Promise<HttpSer
     }),
     {
       legacy: "stateless",
+      maxRequestBodySize: MAX_HTTP_REQUEST_BYTES,
       onerror: (error) => logger.error(
         `Streamable HTTP transport error: ${error.message}`,
         undefined,
@@ -117,7 +121,13 @@ export async function startHttpServer(config: HttpServerConfig): Promise<HttpSer
     );
   }
 
-  const honoListener = getRequestListener(app.fetch, { hostname: config.host });
+  // The adapter installs its JSON parser before our routes. Wrap the whole
+  // app so oversized bodies are rejected before that parser clones/decodes
+  // them, including requests without Content-Length (chunked transfer).
+  const boundedApp = new Hono();
+  boundedApp.use("*", bodyLimit({ maxSize: MAX_HTTP_REQUEST_BYTES }));
+  boundedApp.route("/", app);
+  const honoListener = getRequestListener(boundedApp.fetch, { hostname: config.host });
 
   return new Promise((resolve, reject) => {
     const httpServer = createServer((request, response) => {

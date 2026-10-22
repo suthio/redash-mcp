@@ -7,6 +7,7 @@ import { createRedashMcpServer, startStdioServer, toolDefinitions } from "../ind
 import { PACKAGE_VERSION } from "../packageInfo.js";
 import { getRedashClient } from "../redashClient.js";
 import { CLIENT_VERSION_MATRIX } from "./clientFixtures.js";
+import { MAX_TOOL_INPUT_ELEMENTS } from "../inputLimits.js";
 
 const redashClient = getRedashClient();
 
@@ -23,6 +24,40 @@ describe("Redash MCP server", () => {
 
   it("defines all 67 public tools", () => {
     expect(toolDefinitions).toHaveLength(67);
+  });
+
+  it.each([MAX_TOOL_INPUT_ELEMENTS - 1, MAX_TOOL_INPUT_ELEMENTS, MAX_TOOL_INPUT_ELEMENTS + 1])(
+    "bounds tool arguments at %i elements before calling Redash",
+    async (elements) => {
+      const create = jest.spyOn(redashClient, "createWidget").mockResolvedValue({ id: 1 } as never);
+      const connection = await connectDirectClient();
+      try {
+        // Three top-level keys plus the options record's keys.
+        const options = Object.fromEntries(Array.from({ length: elements - 3 }, (_, i) => [`k${i}`, i]));
+        const result = await connection.client.callTool({
+          name: "create_widget", arguments: { dashboard_id: 1, width: 1, options },
+        });
+        expect(result.isError === true).toBe(elements > MAX_TOOL_INPUT_ELEMENTS);
+        expect(create).toHaveBeenCalledTimes(elements > MAX_TOOL_INPUT_ELEMENTS ? 0 : 1);
+      } finally { await connection.close(); }
+    },
+  );
+
+  it("allows a 1,000-widget bulk layout with every supported position field", async () => {
+    const widgets = Array.from({ length: 1_000 }, (_, id) => ({ id, text: "", options: {} }));
+    jest.spyOn(redashClient, "getDashboard").mockResolvedValue({ id: 1, widgets } as never);
+    const update = jest.spyOn(redashClient, "updateWidget").mockResolvedValue({ id: 1 } as never);
+    const connection = await connectDirectClient();
+    try {
+      const result = await connection.client.callTool({
+        name: "update_dashboard_layout",
+        arguments: { dashboardId: 1, widgets: widgets.map(({id}) => ({
+          widgetId: id, position: { col: 0, row: id, sizeX: 6, sizeY: 3, autoHeight: false },
+        })) },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(update).toHaveBeenCalledTimes(1_000);
+    } finally { await connection.close(); }
   });
 
   it("advertises the published package version", async () => {
