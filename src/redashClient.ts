@@ -1250,7 +1250,16 @@ export class RedashClient {
       let payload = data;
       if (data.options) {
         const existing = await this.client.get(`/api/alerts/${alertId}`);
-        payload = { ...data, options: { ...existing.data.options, ...data.options } };
+        const storedOptions = existing.data.options;
+        const options = { ...storedOptions, ...data.options };
+        // Older MCP versions saved valid alert options without selector.
+        // Repair absence only: explicit null/empty/unknown values may carry
+        // version-specific meaning and must not be silently normalized.
+        if (storedOptions && typeof storedOptions === 'object' && !Array.isArray(storedOptions)
+          && !Object.hasOwn(options, 'selector')) {
+          options.selector = 'first';
+        }
+        payload = { ...data, options };
       }
       const response = await this.client.post(`/api/alerts/${alertId}`, payload);
       return response.data;

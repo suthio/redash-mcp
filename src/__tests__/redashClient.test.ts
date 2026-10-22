@@ -1610,6 +1610,40 @@ describe('RedashClient', () => {
         options: { column: 'c', op: '>', value: 1, selector: 'max' }
       });
     });
+
+    it.each([{ value: 5 }, {}])('repairs a legacy missing selector on an options update %j', async patch => {
+      const stored = { column: 'c', op: '>', value: 1, muted: true, custom_body: 'value {{QUERY_RESULT_VALUE}}', custom_subject: 'subject', template: 'legacy' };
+      mockAxiosInstance.get.mockResolvedValue({ data: { id: 1, options: stored } });
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1 } });
+      await client.updateAlert(1, { options: patch });
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1', {
+        options: { ...stored, ...patch, selector: 'first' },
+      });
+    });
+
+    it.each(['first', 'min', 'max', '', null, 'version-specific'])('preserves an existing explicit selector %j', async selector => {
+      mockAxiosInstance.get.mockResolvedValue({ data: { id: 1, options: { column: 'c', op: '>', value: 1, selector } } });
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1 } });
+      await client.updateAlert(1, { options: { value: 5 } });
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1', {
+        options: { column: 'c', op: '>', value: 5, selector },
+      });
+    });
+
+    it('does not overwrite an explicit replacement selector while repairing legacy options', async () => {
+      mockAxiosInstance.get.mockResolvedValue({ data: { id: 1, options: { column: 'c', op: '>', value: 1 } } });
+      mockAxiosInstance.post.mockResolvedValue({ data: { id: 1 } });
+      await client.updateAlert(1, { options: { selector: 'min', muted: false, custom_body: '' } });
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/alerts/1', {
+        options: { column: 'c', op: '>', value: 1, selector: 'min', muted: false, custom_body: '' },
+      });
+    });
+
+    it('does not write if the existing alert cannot be read', async () => {
+      mockAxiosInstance.get.mockRejectedValue(new Error('read denied'));
+      await expect(client.updateAlert(1, { options: { value: 5 } })).rejects.toThrow('read denied');
+      expect(mockAxiosInstance.post).not.toHaveBeenCalled();
+    });
   });
 
   describe('deleteAlert', () => {
