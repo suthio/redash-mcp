@@ -273,10 +273,10 @@ export interface RedashWidget {
 export interface CreateWidgetRequest {
   dashboard_id: number;
   // Redash pops this key unconditionally, so text widgets must send null
-  visualization_id: number | null;
+  visualization_id?: number | null;
   text?: string;
   width: number;
-  options: any;
+  options?: any;
 }
 
 // Redash overwrites both fields on every update and ignores everything else
@@ -1369,7 +1369,10 @@ export class RedashClient {
   // Create a new widget
   async createWidget(data: CreateWidgetRequest): Promise<RedashWidget> {
     try {
-      const response = await this.client.post('/api/widgets', data);
+      // Redash's widgets.py does widget_properties.pop("visualization_id") with no default,
+      // so an omitted key (JSON.stringify drops undefined) raises a server-side 500 for text widgets.
+      const payload = { ...data, visualization_id: data.visualization_id ?? null };
+      const response = await this.client.post('/api/widgets', payload);
       return response.data;
     } catch (error) {
       logger.error(`Error creating widget: ${error}`);
