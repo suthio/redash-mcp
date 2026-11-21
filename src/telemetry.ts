@@ -1,5 +1,6 @@
 import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
 import { DiagLogLevel, diag, type DiagLogger } from "@opentelemetry/api";
+import { getNumberFromEnv } from "@opentelemetry/core";
 import { OTLPLogExporter as GrpcLogExporter } from "@opentelemetry/exporter-logs-otlp-grpc";
 import { OTLPLogExporter as JsonLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPLogExporter as ProtobufLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
@@ -32,7 +33,7 @@ import {
   type PushMetricExporter,
 } from "@opentelemetry/sdk-metrics";
 import { NodeSDK } from "@opentelemetry/sdk-node";
-import { BatchSpanProcessor, type SpanExporter } from "@opentelemetry/sdk-trace-base";
+import { BatchSpanProcessor, type SpanExporter } from "@opentelemetry/sdk-trace";
 import {
   ATTR_HTTP_ROUTE,
   ATTR_SERVICE_NAME,
@@ -281,7 +282,13 @@ function createSpanProcessors(config: ResolvedTelemetryConfig) {
   }
 
   try {
-    return [new BatchSpanProcessor(createTraceExporter(config.traces.protocol))];
+    return [new BatchSpanProcessor({
+      exporter: createTraceExporter(config.traces.protocol),
+      maxQueueSize: getNumberFromEnv("OTEL_BSP_MAX_QUEUE_SIZE"),
+      maxExportBatchSize: getNumberFromEnv("OTEL_BSP_MAX_EXPORT_BATCH_SIZE"),
+      scheduledDelayMillis: getNumberFromEnv("OTEL_BSP_SCHEDULE_DELAY"),
+      exportTimeoutMillis: getNumberFromEnv("OTEL_BSP_EXPORT_TIMEOUT"),
+    })];
   } catch (error) {
     telemetryWarning(`Failed to configure trace export; disabling traces: ${formatUnknownError(error)}`);
     return [];

@@ -1,9 +1,11 @@
-import { context, trace } from "@opentelemetry/api";
 import {
   SeverityNumber,
+  context,
   logs,
-  type LogAttributes,
-} from "@opentelemetry/api-logs";
+  trace,
+  type AnyValue,
+  type Attributes,
+} from "@opentelemetry/api";
 
 const otelLogger = logs.getLogger("@suthio/redash-mcp");
 
@@ -123,13 +125,13 @@ function normalizeAttributes(
   fields: LogFields | undefined,
   seen: WeakSet<object> = new WeakSet(),
   depth = 0,
-): LogAttributes | undefined {
+): Attributes | undefined {
   if (!fields) {
     return undefined;
   }
 
   seen.add(fields);
-  const attributes: LogAttributes = {};
+  const attributes: Attributes = {};
   try {
     for (const [key, value] of Object.entries(fields)) {
       const normalized = normalizeAttributeValue(value, seen, depth);
@@ -147,7 +149,7 @@ function normalizeAttributeValue(
   value: unknown,
   seen: WeakSet<object>,
   depth: number,
-): LogAttributes[string] | undefined {
+): AnyValue {
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
@@ -170,7 +172,7 @@ function normalizeAttributeValue(
       if (Array.isArray(value)) {
         return value
           .map((entry) => normalizeAttributeValue(entry, seen, depth + 1))
-          .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+          .filter((entry) => entry !== undefined);
       }
       return normalizeAttributes(value as LogFields, seen, depth + 1) ?? {};
     } catch {
