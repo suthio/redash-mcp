@@ -81,7 +81,7 @@
     "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "axios": "^1.19.0",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.8",
     "hono": "^4.12.33",
     "socks-proxy-agent": "^8.0.5",
     "stream-chain": "^4.2.5",
