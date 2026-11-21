@@ -1,5 +1,5 @@
 // ESM-only packages that must be transpiled to CJS for Jest.
-const esmOnlyDeps = ['stream-json', 'stream-chain'];
+const esmOnlyDeps = ['stream-json', 'stream-chain', 'socks-proxy-agent', 'agent-base'];
 
 export default {
   testEnvironment: 'node',
