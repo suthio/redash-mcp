@@ -3,7 +3,6 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createConnection } from "node:net";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { jest } from "@jest/globals";
 import { LOOPBACK_ALLOWED_HOSTNAMES } from "../config.js";
 import { startHttpServer, type HttpServerHandle } from "../httpServer.js";
 import { toolDefinitions } from "../index.js";

@@ -2,29 +2,18 @@
 const esmOnlyDeps = ['stream-json', 'stream-chain'];
 
 export default {
-  preset: 'ts-jest/presets/default-esm',
   testEnvironment: 'node',
-  extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {
     '^.+\\.tsx?$': [
-      'ts-jest',
-      {
-        useESM: true,
-        // ts-jest's ESM mode overrides `module`, which drops moduleResolution
-        // to Node10 and breaks NodeNext package "exports" lookups (stream-json
-        // subpath imports); 'bundler' restores exports-map resolution.
-        tsconfig: { moduleResolution: 'bundler' },
-      },
+      '@swc/jest',
+      { jsc: { parser: { syntax: 'typescript' }, target: 'es2022' } },
     ],
     [`[\\\\/](${esmOnlyDeps.join('|')})[\\\\/].*\\.js$`]: [
-      'ts-jest',
-      {
-        isolatedModules: true,
-        tsconfig: { allowJs: true, checkJs: false, module: 'commonjs' },
-      },
+      '@swc/jest',
+      { jsc: { parser: { syntax: 'ecmascript' }, target: 'es2022' } },
     ],
   },
   // Ignore node_modules except paths that contain an ESM-only dep anywhere
