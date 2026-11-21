@@ -1,6 +1,5 @@
 import { RedashClient } from '../redashClient.js';
 import axios from 'axios';
-import { jest } from '@jest/globals';
 import { Readable } from 'node:stream';
 import { logger } from '../logger.js';
 import { isToolContentCaptureEnabled } from '../telemetry.js';

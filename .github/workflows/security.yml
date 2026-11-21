@@ -19,13 +19,15 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
+        env:
+          NPM_CONFIG_REGISTRY: https://npm.flatt.tech/
         with:
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22.13.x'
+          node-version: '26.13.1'
 
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level=high

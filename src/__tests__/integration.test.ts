@@ -9,7 +9,6 @@ import axios from 'axios';
 import { getRedashClient, RedashClient } from '../redashClient.js';
 import { toolDefinitions } from '../index.js';
 import { logger } from '../logger.js';
-import { jest } from '@jest/globals';
 
 // Mock axios to avoid real API calls. Provide a default stub instance
 // (including `interceptors`) so the module-level `redashClient` singleton -
@@ -52,7 +51,7 @@ describe('MCP Server Integration', () => {
 
       if (mockedAxios.create) {
         const mockInstance = {
-          get: jest.fn<any>().mockRejectedValue(new Error('Network error')),
+          get: jest.fn().mockRejectedValue(new Error('Network error')),
           defaults: { headers: {} },
           // RedashClient registers a request interceptor for per-request auth
           // (see requestAuth.ts); this stub must exist or the RedashClient

@@ -27,12 +27,14 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
+        env:
+          NPM_CONFIG_REGISTRY: https://npm.flatt.tech/
         with:
           run_install: false
       
       - uses: actions/setup-node@v7
         with:
-          node-version: '24.22.1'
+          node-version: '26.13.1'
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
 

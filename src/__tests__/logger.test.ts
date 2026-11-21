@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { logs } from "@opentelemetry/api-logs";
+import { logs } from "@opentelemetry/api";
 import {
   InMemoryLogRecordExporter,
   LoggerProvider,
