@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.1.2](https://github.com/suthio/redash-mcp/compare/v0.1.1...v0.1.2) - 2026-11-21
+
+- chore(deps): bump sigstore/cosign-installer from 4.1.2 to 4.1.3 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/129
+- chore(deps-dev): bump @types/node from 22.20.1 to 26.6.5 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/128
+- chore(deps): bump dotenv from 17.4.2 to 18.0.8 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/125
+- chore(deps): bump hono from 4.13.5 to 4.13.13 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/124
+- chore(deps-dev): bump @playwright/test from 1.62.1 to 1.64.1 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/123
+- chore(deps): bump @opentelemetry/sdk-logs from 0.221.0 to 0.223.0 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/126
+- Add security scanning to CI and releases by @kahirokunn in https://github.com/suthio/redash-mcp/pull/110
+- chore: upgrade to Node.js 26 and TypeScript 7, refresh dependencies by @kahirokunn in https://github.com/suthio/redash-mcp/pull/131
+
 ## [v0.1.1](https://github.com/suthio/redash-mcp/compare/v0.1.0...v0.1.1) - 2026-10-21
 
 - chore(deps): bump zod from 4.4.3 to 4.5.4 by @dependabot[bot] in https://github.com/suthio/redash-mcp/pull/108
