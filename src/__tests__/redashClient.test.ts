@@ -747,9 +747,9 @@ describe('RedashClient', () => {
 
       const result = await client.getDashboardBySlug('test-dashboard');
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/dashboards/test-dashboard', {
-        params: { legacy: null }
-      });
+      const [[url, config]] = mockAxiosInstance.get.mock.calls;
+      const realAxios = jest.requireActual<typeof import('axios')>('axios').default;
+      expect(realAxios.getUri({ ...config, url })).toBe('/api/dashboards/test-dashboard?legacy=true');
       expect(result).toEqual(mockDashboard);
     });
 
