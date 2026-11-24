@@ -109,6 +109,100 @@ describe("Redash MCP server", () => {
     }
   });
 
+  describe("widget tools", () => {
+    const storedOptions = {
+      position: { col: 0, row: 0, sizeX: 6, sizeY: 20 },
+      parameterMappings: {
+        window: { name: "window", type: "dashboard-level", mapTo: "window", title: "Window" },
+      },
+    };
+
+    beforeEach(() => {
+      jest.spyOn(redashClient, "getDashboard").mockResolvedValue({
+        id: 53,
+        widgets: [{ id: 317, dashboard_id: 53, width: 1, text: "", options: storedOptions }],
+      } as never);
+    });
+
+    it("keeps parameter mappings when moving a widget", async () => {
+      const updateSpy = jest.spyOn(redashClient, "updateWidget").mockResolvedValue({ id: 317 } as never);
+      const connection = await connectDirectClient();
+
+      try {
+        const result = await connection.client.callTool({
+          name: "update_widget_layout",
+          arguments: { widgetId: 317, dashboardId: 53, position: { row: 2 } },
+        });
+
+        expect(result.isError).not.toBe(true);
+        expect(updateSpy).toHaveBeenCalledWith(317, {
+          text: "",
+          options: {
+            ...storedOptions,
+            position: { ...storedOptions.position, row: 2 },
+          },
+        });
+      } finally {
+        await connection.close();
+      }
+    });
+
+    it("keeps the position when updating parameter mappings", async () => {
+      const updateSpy = jest.spyOn(redashClient, "updateWidget").mockResolvedValue({ id: 317 } as never);
+      const connection = await connectDirectClient();
+
+      try {
+        const result = await connection.client.callTool({
+          name: "update_widget_parameter_mappings",
+          arguments: {
+            widgetId: 317,
+            dashboardId: 53,
+            parameterMappings: [{ name: "variant", type: "static-value", value: "subs_b" }],
+          },
+        });
+
+        expect(result.isError).not.toBe(true);
+        const [, sent] = updateSpy.mock.calls[0];
+        expect(sent.options.position).toEqual(storedOptions.position);
+        expect(Object.keys(sent.options.parameterMappings).sort()).toEqual(["variant", "window"]);
+      } finally {
+        await connection.close();
+      }
+    });
+
+    it("sends text and stored options when update_widget only changes text", async () => {
+      const updateSpy = jest.spyOn(redashClient, "updateWidget").mockResolvedValue({ id: 317 } as never);
+      const connection = await connectDirectClient();
+
+      try {
+        await connection.client.callTool({
+          name: "update_widget",
+          arguments: { widgetId: 317, dashboardId: 53, text: "## subs_b" },
+        });
+
+        expect(updateSpy).toHaveBeenCalledWith(317, { text: "## subs_b", options: storedOptions });
+      } finally {
+        await connection.close();
+      }
+    });
+
+    it("sends a null visualization_id for text widgets", async () => {
+      const createSpy = jest.spyOn(redashClient, "createWidget").mockResolvedValue({ id: 400 } as never);
+      const connection = await connectDirectClient();
+
+      try {
+        await connection.client.callTool({
+          name: "create_widget",
+          arguments: { dashboard_id: 53, width: 1, text: "## subs_b" },
+        });
+
+        expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ visualization_id: null, text: "## subs_b" }));
+      } finally {
+        await connection.close();
+      }
+    });
+  });
+
   it("passes pagination and search arguments through get_schema", async () => {
     const schemaPage = {
       page: 2,
