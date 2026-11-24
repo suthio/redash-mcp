@@ -739,7 +739,7 @@ export class RedashClient {
   async getDashboardBySlug(slug: string): Promise<RedashDashboard> {
     try {
       const response = await this.client.get(`/api/dashboards/${slug}`, {
-        params: { legacy: null }
+        params: { legacy: true }
       });
       return response.data;
     } catch (error) {
